@@ -12,3 +12,4 @@ progress note 2025-10-21 #11: drafted revision of rdbms report and dev log
 progress note 2025-10-22 #12: drafted revision of rdbms report and dev log
 progress note 2025-10-23 #13: drafted revision of rdbms report and dev log
 progress note 2025-10-24 #14: drafted revision of rdbms report and dev log
+progress note 2025-10-27 #15: drafted revision of rdbms report and dev log
