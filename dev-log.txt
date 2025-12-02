@@ -80,3 +80,4 @@ progress note 2025-12-02 #79: drafted revision of rdbms report and dev log
 progress note 2025-12-02 #80: drafted revision of rdbms report and dev log
 progress note 2025-12-02 #81: drafted revision of rdbms report and dev log
 progress note 2025-12-02 #82: drafted revision of rdbms report and dev log
+progress note 2025-12-02 #83: drafted revision of rdbms report and dev log
