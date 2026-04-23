@@ -287,3 +287,4 @@ progress note 2026-04-21 #286: drafted revision of rdbms report and dev log
 progress note 2026-04-23 #287: drafted revision of rdbms report and dev log
 progress note 2026-04-23 #288: drafted revision of rdbms report and dev log
 progress note 2026-04-23 #289: drafted revision of rdbms report and dev log
+progress note 2026-04-23 #290: drafted revision of rdbms report and dev log
