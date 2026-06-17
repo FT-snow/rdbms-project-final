@@ -401,3 +401,4 @@ progress note 2026-06-12 #400: drafted revision of rdbms report and dev log
 progress note 2026-06-12 #401: drafted revision of rdbms report and dev log
 progress note 2026-06-15 #402: drafted revision of rdbms report and dev log
 progress note 2026-06-15 #403: drafted revision of rdbms report and dev log
+progress note 2026-06-17 #404: drafted revision of rdbms report and dev log
