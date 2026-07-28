@@ -492,3 +492,4 @@ progress note 2026-07-23 #491: drafted revision of rdbms report and dev log
 progress note 2026-07-23 #492: drafted revision of rdbms report and dev log
 progress note 2026-07-25 #493: drafted revision of rdbms report and dev log
 progress note 2026-07-27 #494: drafted revision of rdbms report and dev log
+progress note 2026-07-28 #495: drafted revision of rdbms report and dev log
