@@ -528,3 +528,4 @@ progress note 2026-08-21 #527: drafted revision of rdbms report and dev log
 progress note 2026-08-23 #528: drafted revision of rdbms report and dev log
 progress note 2026-08-24 #529: drafted revision of rdbms report and dev log
 progress note 2026-08-25 #530: drafted revision of rdbms report and dev log
+progress note 2026-08-26 #531: drafted revision of rdbms report and dev log
