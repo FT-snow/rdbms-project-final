@@ -604,3 +604,4 @@ progress note 2026-09-30 #603: drafted revision of rdbms report and dev log
 progress note 2026-09-30 #604: drafted revision of rdbms report and dev log
 progress note 2026-09-30 #605: drafted revision of rdbms report and dev log
 progress note 2026-09-30 #606: drafted revision of rdbms report and dev log
+progress note 2026-09-30 #607: drafted revision of rdbms report and dev log
