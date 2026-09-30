@@ -577,3 +577,4 @@ progress note 2026-09-30 #576: drafted revision of rdbms report and dev log
 progress note 2026-09-30 #577: drafted revision of rdbms report and dev log
 progress note 2026-09-30 #578: drafted revision of rdbms report and dev log
 progress note 2026-09-30 #579: drafted revision of rdbms report and dev log
+progress note 2026-09-30 #580: drafted revision of rdbms report and dev log
