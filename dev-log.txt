@@ -675,3 +675,4 @@ progress note 2026-10-08 #674: drafted revision of rdbms report and dev log
 progress note 2026-10-08 #675: drafted revision of rdbms report and dev log
 progress note 2026-10-08 #676: drafted revision of rdbms report and dev log
 progress note 2026-10-10 #677: drafted revision of rdbms report and dev log
+progress note 2026-10-11 #678: drafted revision of rdbms report and dev log
