@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --canvas: #f7f6f3;
+  --surface: #ffffff;
+  --ink: #111111;
+  --muted: #787774;
+  --line: #eaeaea;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* subtle depth on major blocks only */
+.card-shadow {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+::selection {
+  background: #111111;
+  color: #ffffff;
+}

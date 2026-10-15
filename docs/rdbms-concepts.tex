@@ -1,0 +1,358 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{amsmath,amsthm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
+
+% ----------------------------------------------------------
+% SQL listing style
+% ----------------------------------------------------------
+\definecolor{kw}{RGB}{127,0,85}
+\definecolor{str}{RGB}{26,98,26}
+\definecolor{cmt}{RGB}{96,96,96}
+\lstdefinelanguage{mysql}{
+  keywords={SELECT,INSERT,UPDATE,DELETE,FROM,WHERE,JOIN,LEFT,RIGHT,INNER,OUTER,
+            ON,GROUP,BY,ORDER,ASC,DESC,HAVING,LIMIT,CREATE,TABLE,DATABASE,DROP,
+            PRIMARY,FOREIGN,KEY,REFERENCES,NOT,NULL,UNIQUE,CHECK,ENUM,DEFAULT,
+            CONSTRAINT,INDEX,AFTER,BEFORE,FOR,EACH,ROW,BEGIN,END,DELIMITER,
+            PROCEDURE,FUNCTION,RETURNS,DECLARE,IF,THEN,SIGNAL,SQLSTATE,SET,
+            MESSAGE_TEXT,START,TRANSACTION,COMMIT,ROLLBACK,EXIT,HANDLER,FOR,
+            TRIGGER,CASE,AVG,SUM,COUNT,MIN,MAX,INTERSECT,UNION,EXCEPT,ALL,
+            OVER,RANK,PERCENT_RANK,VIEW,AS,IN,IS,AND,OR,CASCADE,RESTRICT,
+            TIMESTAMP DIAGNOSTICS DATE TIME WEEKDAY CURDATE AUTO INCREMENT,
+            BIGINT UNSIGNED INT UNSIGNED INT DECIMAL VARCHAR SMALLINT TINYINT},
+  keywordstyle=\color{kw}\bfseries,
+  sensitive=true,
+  comment=[l]{--},
+  morecomment=[s]{/*}{*/},
+  commentstyle=\color{cmt}\itshape,
+  string=[b]',
+  stringstyle=\color{str},
+  showstringspaces=false,
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  framerule=0pt,
+  rulecolor=\color{gray!30},
+  backgroundcolor=\color{gray!5}
+}
+\lstset{language=mysql}
+
+\title{Hospital Appointment System\\
+\large RDBMS Concepts Report --- RDBMS Course Project, Final Submission}
+\author{Prakhar Upadhyay \and Shaurya \and Tanay}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report documents the database design of a hospital appointment
+management system built on MySQL 8 with a Next.js application front end.
+We present the requirement analysis, an ER model, a 1NF--3NF normalization
+walkthrough, the physical schema with integrity constraints, triggers,
+stored procedures and views, transaction design for concurrent booking and
+billing, and the indexing strategy with EXPLAIN evidence. All SQL is shipped
+in the repository as executable scripts.
+\end{abstract}
+
+\tableofcontents
+
+% ==========================================================
+\section{Introduction and Scope}
+% ==========================================================
+The system manages the day-to-day operations of a mid-size clinic: patient
+registration, doctor schedules, appointment booking, prescriptions,
+inventory-driven billing and payments, plus management reports.
+Three durable artefacts document the design: \texttt{schema.sql}
+(schema + sample data), \texttt{report\_queries.sql} (the analytical
+queries used for screenshots), and this report.
+
+Technology: MySQL 8, the \texttt{mysql2} driver, Next.js App Router
+(server actions), Bun as runtime and package manager.
+
+% ==========================================================
+\section{Database Design}
+% ==========================================================
+
+\subsection{ER Model}
+Figure~\ref{fig:er} shows the ER model. The full diagram, including both a
+Mermaid rendering and a dbdiagram.io specification, lives in
+\texttt{docs/er-diagram.md}.
+
+\begin{table}[h]\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Relationship & Cardinality & Enforcement \\
+\midrule
+departments $\rightarrow$ doctors & 1:N & \texttt{doctors.dept\_id} FK \\
+doctors $\rightarrow$ doctor\_schedules & 1:N & FK, \texttt{ON DELETE CASCADE} \\
+patients $\rightarrow$ appointments & 1:N & FK, \texttt{ON DELETE RESTRICT} \\
+doctors $\rightarrow$ appointments & 1:N & FK, \texttt{ON DELETE RESTRICT} \\
+appointments $\rightarrow$ prescriptions & 1:1 & unique FK column \\
+appointments $\rightarrow$ billing & 1:1 & unique FK column \\
+prescriptions $\leftrightarrow$ medicines & M:N & bridge \texttt{prescription\_items} \\
+billing $\rightarrow$ payments & 1:N & FK, \texttt{ON DELETE RESTRICT} \\
+users $\rightarrow$ doctors & 0..1 & nullable FK, \texttt{SET NULL} \\
+\bottomrule
+\end{tabular}
+\caption{Cardinality matrix for the schema.}\label{fig:er}
+\end{table}
+
+\subsection{Normalization Walkthrough}
+
+\paragraph{Unnormalized form.} A visit sheet records
+(patient, doctor, date, time, fee, drug 1..3, doses, days, bill status,
+payment method, amount). Repeating-degree groups such as
+\texttt{medicine1..medicine3} violate 1NF.
+
+\paragraph{1NF.} Atomic values only; the repeating group becomes one row per
+prescribed medicine, which eventually forms \texttt{prescription\_items}.
+
+\paragraph{2NF.} Assuming the composite line key
+\texttt{(patient, doctor, date, time, medicine)}, several attributes depend on
+only part of the key: \texttt{consultation\_fee} depends on the doctor part;
+\texttt{dob}, \texttt{phone} depend on the patient part; \texttt{dosage},
+\texttt{days} depend on the medicine line. These partial dependencies are
+removed by splitting out \texttt{patients}, \texttt{doctors},
+\texttt{appointments} and the prescription line table.
+
+\paragraph{3NF.} Transitive chains inside appointment rows
+($\text{appointment} \rightarrow \text{doctor} \rightarrow \text{department}$
+and $\text{appointment} \rightarrow \text{prescription} \rightarrow \text{medicines}$)
+are removed by the final 3NF schema shown in Section~\ref{sec:physical}.
+The only retained derived attribute is \texttt{billing.total}, an intentional
+financial snapshot: a bill must not silently reprice when a medicine price
+changes later, so \texttt{total} is stored with correct values maintained by
+the \texttt{generate\_bill} procedure.
+
+% ==========================================================
+\section{Physical Schema}\label{sec:physical}
+% ==========================================================
+
+The design enforces integrity \emph{physically}, not by convention:
+
+\begin{itemize}
+  \item Primary keys on all 12 tables (surrogate \texttt{AUTO\_INCREMENT}).
+  \item Foreign keys with explicit delete behaviour:
+        \texttt{RESTRICT} prevents deleting a doctor or patient with
+        appointments; \texttt{CASCADE} keeps schedules, prescriptions and
+        bills attached to their owner; \texttt{SET NULL} detaches a doctor
+        login from a deleted doctor.
+  \item \texttt{UNIQUE (doctor\_id, appt\_date, appt\_time)} --- a single
+        appointment per doctor per hour slot, the physical double-booking
+        guard.
+  \item \texttt{CHECK} constraints:
+        \texttt{consultation\_fee > 0}, \texttt{stock >= 0},
+        \texttt{total >= 0}, \texttt{amount > 0},
+        \texttt{start\_time < end\_time}, \texttt{dob <= CURDATE()}.
+  \item \texttt{ENUM} types constrain \texttt{status},
+        \texttt{gender}, \texttt{method}, \texttt{role} to their
+        nominal domains, with \texttt{DEFAULT 'booked'} as the
+        appointment status.
+\end{itemize}
+
+\begin{lstlisting}
+CREATE TABLE appointments (
+  appointment_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  patient_id INT UNSIGNED NOT NULL,
+  doctor_id  INT UNSIGNED NOT NULL,
+  appt_date  DATE NOT NULL,
+  appt_time  TIME NOT NULL,
+  status ENUM('booked','completed','cancelled') NOT NULL DEFAULT 'booked',
+  reason VARCHAR(255) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_doctor_slot (doctor_id, appt_date, appt_time),
+  CONSTRAINT fk_appt_patient FOREIGN KEY (patient_id)
+    REFERENCES patients(patient_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_appt_doctor FOREIGN KEY (doctor_id)
+    REFERENCES doctors(doctor_id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+\end{lstlisting}
+
+% ==========================================================
+\section{Triggers}
+% ==========================================================
+Triggers encode business rules atomically at the row level.
+The sealed fiscal rules keep stock, billing and audit consistent without
+relying on every caller remembering three update statements.
+
+\begin{enumerate}
+  \item \textbf{\texttt{trg\_item\_insert}} (AFTER INSERT on
+        \texttt{prescription\_items}) --- decrement the medicine stock by one
+        for every written prescription line; guarded by \texttt{stock > 0}
+        so stock never dips below the \texttt{CHECK} limit.
+  \item \textbf{\texttt{trg\_appt\_completed}} (AFTER UPDATE on
+        \texttt{appointments}) --- when an appointment transitions to
+        \texttt{'completed'}, insert the initial billing row using the
+        doctor's consultation fee.
+  \item \textbf{\texttt{trg\_payment\_insert}} (AFTER INSERT on
+        \texttt{payments}) --- recompute the cumulative paid amount and
+        flip \texttt{billing.paid\_status} to \texttt{'paid'} once the
+        total is covered.
+  \item \textbf{\texttt{trg\_appt\_audit\_update}} and
+        \textbf{\texttt{trg\_appt\_audit\_delete}} --- insert rows in the
+        \texttt{audit\_log} for every appointment modification.
+\end{enumerate}
+
+\begin{lstlisting}
+CREATE TRIGGER trg_payment_insert
+AFTER INSERT ON payments
+FOR EACH ROW
+BEGIN
+  DECLARE paid_sum DECIMAL(10,2);
+  SELECT COALESCE(SUM(amount), 0) INTO paid_sum
+    FROM payments WHERE bill_id = NEW.bill_id;
+  UPDATE billing
+     SET paid_status = IF(paid_sum >= total, 'paid', 'unpaid')
+   WHERE bill_id = NEW.bill_id;
+END
+\end{lstlisting}
+
+% ==========================================================
+\section{Stored Procedures and Functions}
+% ==========================================================
+\begin{itemize}
+  \item \texttt{book\_appointment(patient, doctor, date, time, reason)} ---
+        validates that the slot lies within the doctor's schedule
+        (WEEKDAY + 1 maps a date to the day-of-week encoding
+        $1{=}\text{Mon} \dots 7{=}\text{Sun}$), opens a transaction, performs
+        the insert and commits; a SQL exception rolls back and
+        \texttt{RESIGNAL}s the original error to the caller.
+  \item \texttt{cancel\_appointment(id)} --- sets the status to
+        \texttt{'cancelled'}, deletes any recorded payments (refund) and the
+        generated bill row; refuses to cancel twice.
+  \item \texttt{generate\_bill(appointment\_id)} --- accumulates the
+        consultation fee plus the price sum of prescribed medicines and
+        refreshes the bill.
+  \item \texttt{get\_available\_slots(doctor, date)} --- reports schedule
+        ranges and the count of occupied 30-minute cells.
+  \item \texttt{calculate\_age(dob)} \emph{(function)} ---
+        \texttt{TIMESTAMPDIFF(YEAR, dob, CURDATE())}; used by views and
+        reports for age grouping.
+\end{itemize}
+
+% ==========================================================
+\section{Transactions (ACID)}
+% ==========================================================
+Booking is the race-sensitive write: two receptionists can hit the same
+doctor/date at once. The insert path (server action
+\texttt{bookAppointmentAction}) wraps three statements in one transaction:
+
+\begin{lstlisting}
+START TRANSACTION;
+  -- 1. validate the doctor's schedule for that day
+  SELECT 1 FROM doctor_schedules
+   WHERE doctor_id = ? AND day_of_week = WEEKDAY(?) + 1
+     AND start_time <= ? AND end_time > ? LIMIT 1;
+  -- 2. intention-lock every row of this doctor/date
+  SELECT appointment_id FROM appointments
+   WHERE doctor_id = ? AND appt_date = ? FOR UPDATE;
+  -- 3. insert; a concurrent insert blocks here and,
+  --    when it resumes, violates uq_doctor_slot and
+  --    ER_DUP_ENTRY surfaces as a friendly error
+  INSERT INTO appointments
+    (patient_id, doctor_id, appt_date, appt_time, status, reason)
+  VALUES (?, ?, ?, ?, 'booked', NULLIF(?, ''));
+COMMIT;
+\end{lstlisting}
+
+\textbf{Atomicity:} all-or-nothing insert. \textbf{Consistency:} schedule and
+uniqueness invariants survive every concurrent schedule. \textbf{Isolation:}
+\texttt{FOR UPDATE} at \texttt{REPEATABLE READ} serialises competing booking
+transactions on the shared predicate. \textbf{Durability:} the \texttt{COMMIT}
+plus InnoDB redo log.
+
+The billing path is equally transactional: insert \texttt{payments}, verify
+the cumulative remaining balance afterwards and roll back on overpay errors;
+the trigger keeps \texttt{paid\_status} consistent within the same commit.
+
+% ==========================================================
+\section{Views}
+% ==========================================================
+\begin{itemize}
+  \item \texttt{todays\_appointments} --- patient, doctor, department, time
+        and status for \texttt{CURDATE()}.
+  \item \texttt{doctor\_workload} --- total appointments per doctor including
+        zero-load doctors (\texttt{LEFT JOIN}).
+  \item \texttt{pending\_bills} --- unpaid bills with patient and doctor names.
+  \item \texttt{low\_stock\_medicines} --- stock below the restock threshold
+        of 10, driving the dashboard widget and warning badges.
+\end{itemize}
+
+% ==========================================================
+\section{Analytical Requirements}
+% ==========================================================
+The report screenshots map one-to-one to \texttt{report\_queries.sql}:
+
+\begin{itemize}
+  \item \textbf{JOIN} of appointments with patient, doctor and department.
+  \item \textbf{GROUP BY/HAVING}: departments with more than 10 appointments
+        this month.
+  \item \textbf{Subquery}: doctors with above-average workload via
+        $\texttt{total} > (\text{AVG of totals})$.
+  \item \textbf{Aggregate}: revenue per department per month.
+  \item \textbf{Window function}: \texttt{RANK() OVER (ORDER BY
+        total\_appointments DESC)} plus \texttt{PERCENT\_RANK}.
+  \item \textbf{Set operations}: patients treated in both General Medicine
+        and Cardiology \texttt{INTERSECT}ed and \texttt{UNION}ed by month.
+\end{itemize}
+
+% ==========================================================
+\section{Indexing Strategy}
+% ==========================================================
+The booking path filters on \texttt{(doctor\_id, appt\_date)}: the
+composite index serves both the unique constraint and the read, so lookups
+for \texttt{EXPLAIN} on that predicate change from scanning all rows to a
+\texttt{ref}/{range} plan. Phone recovery in the front desk search is the
+first read path; it relies on a seeded phone search demo (both EXPLAIN
+before/after runs proved non-unique key scan/range choice in Workbench,
+both recorded for the report).
+
+A second relevant detail: the \texttt{uq\_doctor\_slot} constraint itself is
+an index, so the FOR UPDATE lock predicate and the uniqueness check share
+one lookup path per booking.
+
+% ==========================================================
+\section{Application Architecture}
+% ==========================================================
+Next.js App Router splits the system as follows:
+
+\begin{itemize}
+  \item \textbf{Server actions} (\texttt{src/server/actions.ts}) validate
+        inputs with Zod and issue parameterised SQL. No user input is
+        concatenated, blocking SQL injection at the source.
+  \item \textbf{Authentication} uses JWTs via \texttt{jose} with passwords
+        \texttt{bcrypt}-verified from \texttt{users}; the role decorates the
+        session and the doctor login optionally binds to \texttt{doctor\_id}.
+  \item \textbf{Pages} are server components fetching with the
+        \texttt{mysql2/promise} pool; the interactive book form is a client
+        component driven by URL search params, so every step is linkable.
+  \item \textbf{Dashboard} is a draggable widget grid where each tile is a
+        live query result (appointments, revenue, bills, stock, workload).
+\end{itemize}
+
+% ==========================================================
+\section{Conclusion}
+% ==========================================================
+The design pushes invariants down into the database layer (unique slots,
+checks, triggers for stock and billing, procedures for workflows) while the
+application concentrates on presentation and transaction orchestration.
+Deliverables --- the ER model, the normalization walkthrough, the
+\dots{}complete \texttt{schema.sql}, the analytical query set and this
+report --- reproduce every artefact used for the final demonstration.
+
+\vspace{1em}
+\begin{center}\rule{8cm}{0.4pt}\end{center}
+
+\begin{center}
+\emph{Built by Prakhar, Shaurya and Tanay --- RDBMS Project, Final.}
+\end{center}
+
+\end{document}
