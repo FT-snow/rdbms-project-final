@@ -4,6 +4,7 @@ import { Table, Th, Td } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
+import { DbUnavailable } from "@/components/db-unavailable";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,8 @@ export default async function PatientsPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const { q = "" } = await searchParams;
-  const patients = await searchPatients(q);
+  const patients = await searchPatients(q).catch(() => null);
+  if (!patients) return <DbUnavailable page="patients" />;
 
   return (
     <section className="space-y-8">

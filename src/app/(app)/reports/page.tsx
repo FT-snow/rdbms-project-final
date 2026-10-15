@@ -1,11 +1,14 @@
 import { getReports } from "@/lib/queries";
 import { Table, Th, Td } from "@/components/ui/table";
 import { Card, CardHeader } from "@/components/ui/card";
+import { DbUnavailable } from "@/components/db-unavailable";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  const { busy, aboveAvg, ranked, revDept, audit } = await getReports();
+  const reports = await getReports().catch(() => null as null);
+  if (!reports) return <DbUnavailable page="reports" />;
+  const { busy, aboveAvg, ranked, revDept, audit } = reports;
 
   return (
     <section className="space-y-10">

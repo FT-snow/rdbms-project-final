@@ -4,6 +4,7 @@ import { Table, Th, Td } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
+import { DbUnavailable } from "@/components/db-unavailable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -17,9 +18,11 @@ export default async function PatientHistoryPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const patient = await getPatient(Number(id));
+  const patient = await getPatient(Number(id)).catch(() => "db" as const);
+  if (patient === "db") return <DbUnavailable page="patient history" />;
   if (!patient) notFound();
-  const history = await getPatientHistory(Number(id));
+  const history = await getPatientHistory(Number(id)).catch(() => null as null);
+  if (!history) return <DbUnavailable page="patient history" />;
 
   return (
     <section className="space-y-8">

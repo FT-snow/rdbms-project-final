@@ -1,12 +1,14 @@
 import { getDashboardData } from "@/lib/queries";
 import DashboardWidgets from "@/components/dashboard-widgets";
+import { DbUnavailable } from "@/components/db-unavailable";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const data = await getDashboardData();
+  const data = await getDashboardData().catch(() => null);
+  if (!data) return <DbUnavailable page="dashboard" />;
   const dt = new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
     day: "numeric",

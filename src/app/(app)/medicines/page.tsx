@@ -4,11 +4,13 @@ import { Table, Th, Td } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { DbUnavailable } from "@/components/db-unavailable";
 
 export const dynamic = "force-dynamic";
 
 export default async function MedicinesPage() {
-  const medicines = await getMedicines();
+  const medicines = await getMedicines().catch(() => null);
+  if (!medicines) return <DbUnavailable page="medicines" />;
   const low = medicines.filter((m) => m.stock < 10).length;
 
   return (

@@ -8,6 +8,11 @@ export const pool = mysql.createPool({
   database: process.env.DB_NAME ?? "hospital_db",
   waitForConnections: true,
   connectionLimit: 10,
+  // Moonshot for cloud MySQL (TiDB/PlanetScale/Aiven) — enable with DB_SSL=true
+  ssl:
+    process.env.DB_SSL === "true"
+      ? { minVersion: "TLSv1.2", rejectUnauthorized: true }
+      : undefined,
   // Return DATE/DATETIME/TIMESTAMP as 'YYYY-MM-DD' strings instead of JS Dates.
   // TIME columns already come back as strings by default.
   dateStrings: ["DATE", "TIMESTAMP", "DATETIME"],

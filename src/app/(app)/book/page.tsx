@@ -2,6 +2,7 @@ import { getDepartments, getDoctors, getAvailableSlots, searchPatients } from "@
 import { bookAppointmentAction } from "@/server/actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
+import { DbUnavailable } from "@/components/db-unavailable";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -19,7 +20,8 @@ export default async function BookPage({
   }>;
 }) {
   const sp = await searchParams;
-  const departments = await getDepartments();
+  const departments = await getDepartments().catch(() => null as null);
+  if (!departments) return <DbUnavailable page="booking" />;
   const today = new Date().toISOString().slice(0, 10);
 
   const deptId = sp.dept ? Number(sp.dept) : undefined;

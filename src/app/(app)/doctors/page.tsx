@@ -3,17 +3,18 @@ import { createDoctorAction, createScheduleAction } from "@/server/actions";
 import { Table, Th, Td } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
+import { DbUnavailable } from "@/components/db-unavailable";
 
 export const dynamic = "force-dynamic";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default async function DoctorsPage() {
-  const [doctors, schedules, departments] = await Promise.all([
-    getDoctors(),
-    getSchedules(),
-    getDepartments(),
-  ]);
+  const all = await Promise.all([getDoctors(), getSchedules(), getDepartments()]).catch(
+    () => null,
+  );
+  if (!all) return <DbUnavailable page="doctors" />;
+  const [doctors, schedules, departments] = all;
   const deptName = new Map(departments.map((d) => [d.dept_id, d.name]));
   const byDoctor = new Map<number, any[]>();
   for (const s of schedules) {
