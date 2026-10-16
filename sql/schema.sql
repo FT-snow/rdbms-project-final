@@ -457,13 +457,13 @@ INSERT INTO medicines (name, price, stock) VALUES ('Pantoprazole 40mg', 33.00, 5
 
 -- All demo passwords are "password123" (bcrypt hashes below)
 INSERT INTO users (username, password_hash, role, doctor_id) VALUES
-('admin', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'admin', NULL);
+('admin', '$2a$10$Ba8KAo2w4ZfxTu5hMCJJVOKb.szgbZ6rmrpNpZBMJDkQYVSYNEMvu', 'admin', NULL);
 INSERT INTO users (username, password_hash, role, doctor_id) VALUES
-('reception', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'receptionist', NULL);
+('reception', '$2a$10$Ba8KAo2w4ZfxTu5hMCJJVOKb.szgbZ6rmrpNpZBMJDkQYVSYNEMvu', 'receptionist', NULL);
 INSERT INTO users (username, password_hash, role, doctor_id) VALUES
-('dr.ananya', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'doctor', 1);
+('dr.ananya', '$2a$10$Ba8KAo2w4ZfxTu5hMCJJVOKb.szgbZ6rmrpNpZBMJDkQYVSYNEMvu', 'doctor', 1);
 INSERT INTO users (username, password_hash, role, doctor_id) VALUES
-('dr.vikram', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'doctor', 2);
+('dr.vikram', '$2a$10$Ba8KAo2w4ZfxTu5hMCJJVOKb.szgbZ6rmrpNpZBMJDkQYVSYNEMvu', 'doctor', 2);
 
 -- A few appointments across the past week so the report views have data
 INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
