@@ -1,0 +1,751 @@
+================================================================================
+ RDBMS PROJECT - HOSPITAL APPOINTMENT SYSTEM
+ COMPLETE CODE & DATABASE EXPLANATION
+
+ Prakhar Upadhyay · Shaurya · Tanay - Final submission, October 2026
+ Repo: github.com/FT-snow/rdbms-project-final
+================================================================================
+
+TABLE OF CONTENTS
+  0. How to read this document
+  1. System overview & architecture
+  2. Frontend explained - file by file
+  3. Backend explained - function by function
+  4. sql/schema.sql - the database, explained exhaustively
+  5. RDBMS concepts used - a survey
+  6. Deployment divergence note (canonical MySQL vs TiDB cloud)
+
+
+================================================================================
+ 0. HOW TO READ THIS DOCUMENT
+================================================================================
+
+This is the narrative companion to the codebase. Every file, function, table,
+trigger, procedure and view has an entry here. Code excerpts are short on
+purpose - open the referenced file alongside this document; the doc tells you
+what every piece is FOR and what breaks without it.
+
+Reading order for a grader pressed for time:
+  Section 4 (schema walkthrough) -> Section 5 (concepts survey) -> Section 3.5
+  (the booking transaction). Those three cover the DBMS syllabus end-to-end.
+
+
+================================================================================
+ 1. SYSTEM OVERVIEW & ARCHITECTURE
+================================================================================
+
+Stack
+------
+  Next.js 15 (App Router)  - frontend AND backend in one deployable app
+  Bun 1.3                  - runtime + package manager (bun.lock present)
+  MySQL 8 / TiDB Cloud     - database (canonical script targets MySQL 8)
+  mysql2 (promise API)     - driver, connection pool, prepared statements
+  Zod                      - input validation before anything reaches SQL
+  jose + bcryptjs          - JWT session tokens + password hashing
+  Tailwind CSS             - styling (a warm-monochrome "editorial" system)
+  Motion                   - animation for the draggable dashboard grid
+  Vercel                   - deployment target (serverless functions)
+
+Architecture in one picture
+---------------------------
+
+    Browser (React 19 client components)
+       |  fetch / form POST
+       v
+    Next.js server (Vercel function)
+       |-- pages = server components  -> read via lib/queries.ts
+       |-- form submissions           -> server actions in server/actions.ts
+       |        |-- Zod validation
+       |        |-- transactions (BEGIN ... COMMIT / ROLLBACK)
+       |-- session                    -> lib/auth.ts (JWT in HttpOnly cookie)
+       v
+    mysql2 pool (lib/db.ts)
+       |
+       v
+    MySQL 8 / TiDB (hospital_db)
+
+Roles and what they unlock
+--------------------------
+  admin         - everything
+  doctor        - appointment detail work: complete visits, prescriptions
+  receptionist  - booking, patients, payments
+
+All three share one `users` table; authorization is coarse-grained (the demo
+relies on any logged-in session reaching all pages, with role displayed).
+The schema keeps the doors open for per-role gating via the role column.
+
+Request lifecycle (one booking, end to end)
+-------------------------------------------
+ 1. GET /book?dept=1&doctor=2&date=2026-10-16  ->  server component renders
+    departments/doctors/slots from three queries (book/page.tsx).
+ 2. User clicks a slot link -> same page rerenders with &time=09:30.
+ 3. User submits the confirm form -> POST invokes bookAppointmentAction
+    (a Next "server action").
+ 4. The action validates with Zod, opens a transaction, verifies the slot is
+    inside the doctor's schedule, locks the doctor's rows for that date
+    (SELECT ... FOR UPDATE), inserts the appointment, commits.
+ 5. redirect() to /appointments/<new id> - the detail page reads everything
+    about that visit in one query.
+
+
+================================================================================
+ 2. FRONTEND EXPLAINED - FILE BY FILE
+================================================================================
+
+Convention: paths relative to repo root. "(app)" is a route group - every page
+inside it shares the authenticated shell layout.
+
+src/app/layout.tsx                      ROOT LAYOUT
+  Loads `Newsreader` via next/font (Google Fonts, self-hosted at build),
+  the CSS reset (globals.css), and sets <title>/description metadata.
+  Nothing else - deliberately thin; the (app) group owns the shell.
+
+src/app/globals.css                     DESIGN TOKENS
+  CSS variables for the palette:
+    --canvas #F7F6F3 (warm bone background)   --ink #111111 (text)
+    --muted  #787774 (secondary text)         --line #EAEAEA (all borders)
+  Body backgrounds the canvas; one micro-shadow class (.card-shadow,
+  rgba(0,0,0,.04)) is the ONLY shadow in the app - flat by design.
+  ::selection inverts to ink/white. No gradients anywhere.
+
+tailwind.config.ts                      TOKEN MAP
+  Extends the default theme with the palette (canvas/surface/ink/mute/line/
+  bone) plus the four muted pastels semantic chips only:
+    redsoft/redtext    #FDEBEC / #9F2F2D   -> cancelled, destructive
+    bluesoft/bluetext  #E1F3FE / #1F6C9F   -> booked, info
+    greensoft/greentext#EDF3EC / #346538   -> completed, paid
+    yellowsoft/yellowtext #FBF3DB / #956400 -> unpaid, low stock
+  Font families: sans = Geist/Helvetica Neue stack, serif = Newsreader
+  (next/font variable --font-newsreader) for headings, mono = JetBrains Mono
+  for ids, times, badges. borderRadius.card = 12px.
+
+src/components/ui/*                     SHADCN-STYLE PRIMITIVES (hand-rolled)
+  button.tsx   - 4 variants (primary = solid ink, outline, ghost, danger
+                 redsoft); active:scale-[0.98]; radius-md; no shadows.
+  card.tsx     - Card = 1px #EAEAEA border, 12px radius, white surface;
+                 CardHeader = serif title + mono meta on a hairline.
+  badge.tsx    - pill, mono uppercase 11px, tracking .05em; tone maps to
+                 the pastels above (booked=blue, completed=green, etc.).
+  input.tsx    - Input/Select/Field; Field renders an uppercase mono label,
+                 the control, and optional red error text.
+  table.tsx    - Table/Th/Td; Th uses the mono-uppercase column style, Td
+                 hairline rows; used by patients/history/appointment/reports.
+  Together these give every screen the same flat document-like look.
+
+src/components/ui/draggable-widget-grid.tsx     DRAGGABLE GRID (2nd-party)
+  Third-party component (pasted verbatim): a bento grid whose layout is
+  solved by an exact tiler (gap-free placement for any column count) and
+  reacts to drags with Motion springs. Pointer drag for mouse/pen, long-press
+  for touch (so page scroll still works), Alt+arrows for keyboards. Each
+  widget is absolutely placed via gridColumn/gridRow; reorder merges the
+  nearest valid arrangement. Used ONLY on the dashboard.
+
+src/components/dashboard-widgets.tsx    DASHBOARD BENTO (client)
+  Six widgets mapped by `kind` onto small presentational components:
+    todayCount    big number + booked/done badges
+    pendingBills  count + total rupees owed
+    lowStock      medicines under the threshold of 10 (yellow badges)
+    workload      top doctors by appointments with inline bars
+    revenue       last 6 months of payments, hand-rolled bar chart
+    todayList     first 5 of today's visits, each linking to its detail page
+  Renders through DraggableWidgetGrid with radius 12 and no persistence -
+  arrangement lives for the tab session, by design.
+
+src/components/flash-banner.tsx         ERROR BANNER (client)
+  Reads ?error= from useSearchParams and renders a redsoft alert. Every
+  mutating server action funnels failures here after a redirect back.
+
+src/components/db-unavailable.tsx       SO-FAILURE SCREEN (server)
+  Replaces a page with a precise diagnostic card when its queries fail:
+  shows the mapped error code + summary + remedy (see src/lib/errors.ts).
+  This is what you see if the DB env vars are wrong - not a 500.
+
+src/components/nav-links.tsx            ACTIVE NAV (client)
+  usePathname()-driven links with aria-current="page" for the active item.
+
+src/app/page.tsx                        ROOT REDIRECT
+  One line: redirect('/dashboard') - the session guard in the (app) layout
+  bounces anonymous visitors to /login.
+
+src/app/login/page.tsx + login-panel.tsx  LOGIN
+  Server page renders the editorial hero (serif headline, mono eyebrow,
+  demo credentials) and hands the form to LoginPanel (client). The panel
+  uses useActionState: pending disables the button ("Signing in..."),
+  errors render as red text under the fields - including mapped database
+  errors (bad env vars) which used to be invisible digests.
+
+src/app/(app)/layout.tsx                THE SHELL (server, guard)
+  requireSession() first - no session cookie -> redirect /login. Then a
+  two-column grid: 220px sidebar (brand, nav, user card showing
+  username + role, sign-out form posting `logoutAction`) + content column.
+  FlashBanner sits above main so action errors appear once, app-wide.
+
+src/app/(app)/dashboard/page.tsx        DASHBOARD
+  Intl date header, "Book appointment" CTA, a one-paragraph usage hint
+  (drag / long-press / Alt+arrows). Data: getDashboardData() - six parallel
+  queries; DB failure renders DbUnavailable with the mapped reason.
+
+src/app/(app)/patients/page.tsx         PATIENTS LIST + REGISTER
+  GET-serialized search (?q=) against name OR phone (both indexed),
+  results table (name/age/gender/phone), per-row "Book" shortcut into the
+  booking flow. Sidebar form posts createPatientAction (Zod-validated).
+  age is computed in SQL: TIMESTAMPDIFF(YEAR, dob, CURDATE()).
+
+src/app/(app)/patients/[id]/page.tsx    PATIENT HISTORY + EDIT
+  One query joins appointments -> doctors -> departments -> billing so the
+  history shows date, doctor+department, status badge, reason, bill total
+  and paid state, each row linking to the appointment page. Sidebar prefills
+  the same Zod form for updates (updatePatientAction).
+
+src/app/(app)/doctors/page.tsx          DOCTORS & SCHEDULES
+  Cards per doctor (specialization, department, consult fee, phone, mono
+  schedule chips like "Mon 09:00-13:00") from doctors + doctor_schedules.
+  Two forms: add a doctor (admin-ish concern) and add a weekly shift. The
+  schedule form overlaps-checks server-side before insert (see actions).
+
+src/app/(app)/book/page.tsx             THE BOOKING FLOW (4 steps)
+  Step state lives in the URL, so every step is shareable/reloadable:
+    ?dept=<id>                     renders department chips (step 1 done)
+    &doctor=<id>                   doctor chips + slot loader form   (step 2)
+    &date=YYYY-MM-DD               loads a schedule -> free-slot grid (step 3)
+    &time=HH:MM                    confirm form (patient select + reason)
+  Free-slot math (getAvailableSlots): read the doctor's shift rows for
+  WEEKDAY(date)+1, emit 30-minute cells, subtract appointments already
+  booked that day (status != cancelled). If the doctor has no shift that
+  weekday the page explains it instead of offering an empty grid.
+
+src/app/(app)/appointments/[id]/page.tsx   VISIT CONTROL ROOM
+  Four zones:
+   - header: badges (booked/completed/cancelled), "Mark completed"
+     (POSTs completeAppointmentAction - auto-creates the bill), "Cancel
+     visit" (cancelAppointmentAction - refunds/bill removal inside a tx).
+   - prescription: existing rows (join through prescription_items) +
+     PrescriptionForm (client) with dynamic medicine rows; adding a row
+     decrements stock app-side; saving recalculates the bill.
+   - billing dl: consultation fee, medicine cost, total, paid-so-far,
+     paid badge; "Recalculate totals" posts regenerateBillAction.
+   - payment form: amount prefilled with the remaining balance, methods
+     cash/card/upi/insurance; overpay is blocked server-side.
+
+src/app/(app)/medicines/page.tsx        INVENTORY
+  One table + inline restock per row (qty -> UPDATE stock = stock + ?).
+  Rows under 10 units wear red "low" badges; header counts them.
+
+src/app/(app)/reports/page.tsx          REPORT GALLERY
+  Each card IS one required SQL query, labeled with its technique:
+    busiest departments   GROUP BY + HAVING (this month)
+    above-average doctors  scalar subquery on the doctor_workload view
+    ranked doctors         RANK() OVER (ORDER BY ... DESC) window function
+    revenue by department/month   aggregate join through payments
+    audit trail            latest 10 audit_log rows (trigger-written)
+  The card meta strings name the technique so screenshots are self-capti
+  oning for the report.
+
+src/app/(app)/error.tsx                 SEGMENT ERROR BOUNDARY
+  Client boundary: shows the actual error message + Next digest with a
+  Retry button - failures are readable, never blank digests.
+
+src/app/global-error.tsx                LAST-RESORT BOUNDARY
+  Own <html>/<body>: message + digest + retry, for catastrophic render
+  errors (rare; exists so users never see Vercel's blank page).
+
+src/app/debug/page.tsx                  TEMP DIAGNOSTICS (remove me)
+  Prints masked env vars + four live connection attempts (SELECT 1 with
+  and without TLS, users count, appointments count, the app pool itself).
+  Built while wiring up the TiDB deployment; delete after go-live.
+
+
+================================================================================
+ 3. BACKEND EXPLAINED - FUNCTION BY FUNCTION
+================================================================================
+
+src/lib/db.ts                            CONNECTION LAYER
+  pool = mysql2/promise.createPool:
+    - everything comes from env: DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME
+    - dateStrings: ['DATE','TIMESTAMP','DATETIME'] -> 'YYYY-MM-DD' strings
+      instead of JS Dates (TIME columns are strings natively). This is why
+      appt_date prints exactly as the schema stores it, no TZ drift.
+    - ssl only when DB_SSL=true (TiDB/PlanetScale/Aiven need TLS; localhost
+      must not get it)
+    - connectionLimit 10 keeps Vercel's concurrency bounded
+  withConn(fn): checks out one dedicated connection - required for anything
+  transactional, since BEGIN/COMMIT must stay on the same session.
+
+src/lib/auth.ts                          SESSIONS
+  login(username, password):
+    1. SELECT user row by username (parameterized - no string concat ever)
+    2. bcrypt.compare(password, password_hash)   <- constant-ish time
+    3. return Session {userId, username, role, doctorId}
+  createSessionCookie: SignJWT (HS256, 12h expiry) -> HttpOnly, SameSite=Lax
+  cookie named `session`. Session cannot be read by client JS; forgery
+  requires JWT_SECRET.
+  getSession: jwtVerify -> typed Session or null (never throws).
+  requireSession: getSession or redirect('/login'). Called in (app)/layout
+  once; every child route inherits the guard.
+
+src/lib/validation.ts                    ZOD GATES
+  Every field spec mirrors a database constraint (defense in depth - the DB
+  is the backstop, Zod makes the failure readable before hitting the wire):
+    loginSchema        username>=3, password>=6       (UX only)
+    patientSchema      name/dob/gender enum/phone regex/email/address
+    doctorSchema       dept_id coerce, fee > 0       (mirrors CHECK fee>0)
+    scheduleSchema     day 1..7, start<end           (mirrors CHECK start<end)
+    medicineSchema     price>=0, stock>=0 int        (mirrors CHECKs)
+    prescriptionSchema diagnosis>=3, items array with dosage/days>=1
+    bookSchema         ids positive, date/time regexes
+    paymentSchema      amount>0, method enum         (mirrors CHECK amount>0)
+  coerce.number on numeric inputs converts form strings safely and rejects
+  garbage before SQL ever sees it.
+
+src/lib/errors.ts                        ERROR TAXONOMY
+  describeDbError(error) maps raw driver codes to {code, summary, remedy}:
+    ER_ACCESS_DENIED_ERROR / TiDB errno 1105 "Access denied"
+        -> username/password - incl. the TiDB cluster-prefix hint
+    ER_BAD_DB_ERROR   -> run the schema script
+    ER_NO_SUCH_TABLE  -> schema not applied
+    ECONNREFUSED / ENOTFOUND / ETIMEDOUT / ER_HOST_NOT_PRIVILEGED
+        -> wrong host/port, DNS, firewall
+    TLS codes (HANDSHAKE_NO_SSL_SUPPORT, UNABLE_TO_VERIFY_LEAF_SIGNATURE...)
+        -> toggle DB_SSL
+  Everything unknown falls through with the raw message. This is what makes
+  the fallback screens and login errors actually diagnosable.
+
+src/lib/queries.ts                       READ LAYER (server components)
+  getDashboardData        6 parallel queries: today's rows+status counts,
+                          revenue by month, pending bills sum, low stock,
+                          workload view. Powers the bento widgets.
+  searchPatients(q)       LIKE search on name/phone LIMIT 50
+  getPatientHistory(id)   visits joined w/ doctors+departments+billing
+  getPatient(id)          one row + computed age
+  getDepartments/getDoctors/getSchedules     booking prerequisites
+  getAvailableSlots(doctor, date)
+      shift rows for WEEKDAY(date)+1 -> 30-min grid cells,
+      minus booked times (status<>'cancelled') for that day.
+      {scheduled:false} means "no shift that weekday".
+  getAppointment(id)      the visit + prescription + items + bill(with
+      sum(payments) paid so far) + medicines catalog (for the form).
+  getMedicines            inventory incl. low-stock badge source
+  getReports              five report queries (see section 2 Reports page)
+  All parameterized; none concatenate user input.
+
+src/server/actions.ts                    WRITE LAYER (server actions)
+
+  safeAction wrapper     every void action runs inside it: exceptions are
+      logged with full stack (visible in runtime logs) and the human message
+      is redirected back as ?error=... for FlashBanner. Next's own control-
+      flow throws (redirect/notFound digests NEXT_*) pass through untouched.
+      This is why failures are precise, never opaque 500s.
+
+  loginAction               state-based (useActionState), so errors return
+      in-band; DB failures format via formatDbError (that is how "Access
+      denied" became a readable screen instead of digest 1562723282).
+
+  createPatientAction / updatePatientAction
+      Zod -> INSERT/UPDATE patients. NULLIF('' ) normalizes empty optional
+      fields to real NULLs (email/address are nullable).
+
+  createDoctorAction         Zod -> INSERT doctors (CHECK fee>0 backstop).
+
+  createScheduleAction       overlap guard BEFORE insert:
+      SELECT 1 FROM doctor_schedules WHERE same doctor+day
+        AND NOT (new_start >= existing_end OR new_end <= existing_start)
+      -> reject "Schedule overlaps an existing shift". The DB CHECK
+      (start<end) re-verifies regardless.
+
+  bookAppointmentAction      THE TRANSACTION (see below)
+      BEGIN
+        schedule validation for WEEKDAY(date)+1 covering the slot
+        SELECT appointment_id FROM appointments
+          WHERE doctor_id=? AND appt_date=? FOR UPDATE       <- gate
+        INSERT INTO appointments (... 'booked' ...)
+      COMMIT (ER_DUP_ENTRY -> friendly "just booked" error + rollback)
+
+      Why FOR UPDATE: two receptions booking the same doctor/day race on
+      this predicate. Transaction two blocks on tx one's row lock; when it
+      resumes, its INSERT violates uq_doctor_slot and ER_DUP_ENTRY becomes
+      the friendly error. DOUBLE BOOKING IS IMPOSSIBLE at the storage layer;
+      the lock only prevents a confusing last-second surprise.
+
+  completeAppointmentAction  status -> completed; then the trg_appt_completed
+      equivalent: INSERT billing (fee from doctors, medicine_cost 0, total
+      = fee) guarded by NOT EXISTS so re-clicks don't duplicate; audit_log
+      row appended (audit trigger equivalent).
+
+  cancelAppointmentAction    the cancel_appointment procedure, app-side, in
+      one transaction: DELETE payments (refund records), DELETE billing,
+      status -> 'cancelled', audit row. Refuses double-cancellation.
+
+  savePrescriptionAction     the richest action:
+      - upserts prescriptions (1:1 with the appointment) via
+        ON DUPLICATE KEY UPDATE (UNIQUE(appointment_id) makes this safe)
+      - skipped already-linked medicines (idempotent re-saves)
+      - per item: SELECT stock ... FOR UPDATE, reject out-of-stock, INSERT
+        prescription_items, then UPDATE medicines SET stock = stock - 1
+        WHERE stock > 0   (trg_item_insert equivalent)
+      - recalculateBill() in the same transaction (below)
+      - COMMIT; rollback on any error (a half-written prescription can
+        never exist)
+
+  recalculateBill(appt)      generate_bill equivalent: fee from the doctor,
+      SUM(medicine.price) through prescription_items, then
+      INSERT ... ON DUPLICATE KEY UPDATE into billing. Used after
+      prescription changes and by the "Recalculate totals" button.
+
+  addPaymentAction           balance-first payment:
+      SELECT total ... FOR UPDATE; SUM(amount) so far; OVERPAY REJECTED
+      (amount > remaining -> error with the remaining rupees); INSERT
+      payments; then set paid_status = paid iff sum >= total
+      (trg_payment_insert equivalent), inside the same transaction.
+
+  regenerateBillAction       recalculateBill + revalidate.
+
+  addMedicineAction / restockMedicineAction
+      inventory CRUD; restock requires qty > 0.
+
+  NOTE ON THE 1:1s: appointments-prescriptions and appointments-billing are
+  1:1 via UNIQUE FK columns; the upsert / NOT EXISTS patterns above are how
+  the app respects them idempotently (double-click safe).
+
+
+================================================================================
+ 4. sql/schema.sql - THE DATABASE, EXPLAINED EXHAUSTIVELY
+================================================================================
+
+(Canonical target: MySQL 8. TiDB runs everything except the trigger,
+procedure and function layer - see Section 6.)
+
+4.0 Top of file
+---------------
+  DROP DATABASE IF EXISTS hospital_db  - idempotent reruns (dev habit)
+  CREATE DATABASE ... utf8mb4 + utf8mb4_unicode_ci
+      utf8mb4 = true Unicode (emojis, Devanagari etc. survive), unicode_ci
+      = accent-insensitive-ish collation, fine for a clinic directory.
+  USE hospital_db.
+
+4.1 users
+---------
+  user_id       PK AUTO_INCREMENT - surrogate key; no natural key is safe
+                (usernames rot, but ids never change)
+  username      VARCHAR(50) UNIQUE - login name; UNIQUE is the lookup index
+  password_hash VARCHAR(255) - bcrypt output (~60 chars; 255 leaves room
+                for argon2+ later)
+  role          ENUM('admin','doctor','receptionist') NOT NULL - the valid
+                roles are a closed set; ENUM is the domain constraint
+  doctor_id     NULL-able FK -> doctors ON DELETE SET NULL - a doctor
+                account optionally binds to a doctor row; deleting the
+                doctor justunbinds the login instead of cascading login
+                deletion
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP - free provenance
+
+4.2 departments
+---------------
+  dept_id PK, name VARCHAR(100) UNIQUE (UNIQUE doubles as the list index;
+  two "Cardiology" rows would poison every FK choice)
+
+4.3 doctors
+-----------
+  doctor_id PK
+  name            VARCHAR(150)
+  dept_id         FK -> departments ON DELETE RESTRICT ON UPDATE CASCADE
+        RESTRICT: you cannot delete a department that has doctors; the
+        data must be disentangled deliberately. CASCADE on update keeps
+        id renames frictionless.
+  specialization  VARCHAR(100)
+  phone           VARCHAR(20) - chars allowed (+, spaces); phones are not
+        numbers you compute with
+  consultation_fee DECIMAL(10,2) not FLOAT - money needs exact decimals
+  CHECK (consultation_fee > 0) - a zero/negative consult is a data bug
+
+4.4 patients
+------------
+  patient_id PK, name, dob DATE NOT NULL, gender ENUM('male','female',
+  'other'), phone (searched - indexed in 4.13), email/address NULLable.
+  "dob <= today" is enforced by TRIGGER trg_patient_dob (4.11) because
+  MySQL 8 CHECK constraints cannot call nondeterministic functions like
+  CURDATE() - a case study in where each constraint mechanism belongs.
+
+4.5 doctor_schedules
+--------------------
+  schedule_id PK, doctor_id FK -> doctors ON DELETE CASCADE (schedules
+  have no meaning without their doctor), day_of_week TINYINT 1=Mon..7=Sun
+  (aligns with WEEKDAY()+1 so the app and DB agree), start_time/end_time
+  TIME with CHECK (start < end) - DB rejects inverted shifts trivially.
+
+4.6 appointments        THE HOT TABLE
+------------
+  appointment_id PK
+  patient_id  FK -> patients ON DELETE RESTRICT - no deleting a patient
+        who has history (medical records must survive)
+  doctor_id   FK -> doctors ON DELETE RESTRICT - same reason
+  appt_date DATE / appt_time TIME - date and time are separate columns so
+        slot math (UNIQUE + FOR UPDATE predicate) is index-friendly
+  status ENUM('booked','completed','cancelled') NOT NULL DEFAULT 'booked'
+        - DEFAULT 'booked' is a required deliverable and also the truth:
+        every insert IS a booking; transitions are explicit
+  created_at - audit-friendly
+  UNIQUE KEY uq_doctor_slot (doctor_id, appt_date, appt_time)
+        THE signature constraint: one appointment per doctor, per date,
+        per exact time. Without it double booking is prevented only by
+        hope. It is also the index FOR UPDATE walks.
+
+4.7 medicines
+-------------
+  medicine_id PK, name VARCHAR(150) UNIQUE, price DECIMAL(10,2),
+  stock INT DEFAULT 0 with CHECK stock >= 0 - inventory can hit zero but
+  never negative; two CHECKs: price >= 0 too.
+
+4.8 prescriptions       1:1 WITH a visit
+---------------
+  prescription_id PK
+  appointment_id  FK+UNIQUE -> appointments ON DELETE CASCADE - the
+        UNIQUE here converts 1:N into 1:1 - each visit has at most one
+        prescription document. Cascade: deleting a visit deletes its Rx.
+  diagnosis VARCHAR(255), notes VARCHAR(500) NULL.
+
+4.9 prescription_items        M:N bridge (prescriptions <-> medicines)
+--------------------
+  item_id PK
+  prescription_id FK -> prescriptions CASCADE   (items die with their Rx)
+  medicine_id     FK -> medicines RESTRICT      (cannot delete a medicine
+        that appears on any prescription - prescriptions are medical
+        record; RESTRICT preserves history)
+  dosage VARCHAR(100) ("1 tab 2x daily"), days SMALLINT UNSIGNED with
+  CHECK (days > 0). This bridge is exactly how 3NF resolves the M:N
+  relationship - no repeating medicine1..medicine3 columns anywhere.
+
+4.10 billing / payments
+-----------------------
+  billing: bill_id PK, appointment_id FK+UNIQUE (1:1 again), consultation
+  _fee, medicine_cost, total DECIMAL(10,2), paid_status ENUM('unpaid',
+  'paid') DEFAULT 'unpaid', CHECK total >= 0, created_at.
+        total is a deliberate, defensible denormalization: it is a
+        financial SNAPSHOT. If a medicine price changes next week, what
+        was billed last week must not move. The stored procedure (or its
+        app equivalent) maintains it.
+  payments: payment_id PK, bill_id FK -> billing RESTRICT (a bill with
+  payments cannot vanish), amount DECIMAL(10,2) CHECK amount > 0,
+  method ENUM('cash','card','upi','insurance'), paid_at TIMESTAMP
+  DEFAULT CURRENT_TIMESTAMP. Billing 1:N payments == part-payments/
+  installments are representable; paid_status is DERIVED state kept
+  current by the trigger (or app equivalent) comparing SUM(amount)
+  against total.
+
+4.11 audit_log
+--------------
+  log_id PK, table_name VARCHAR(64), action ENUM('UPDATE','DELETE',
+  'INSERT'), record_id INT, changed_at. Pure trigger-fed history of who
+  did what to appointments (and any other table later). No FK by design -
+  logs must survive even if referenced rows vanish.
+
+4.12 indexes (beyond PKs/UNIQUEs)
+---------------------------------
+  idx_appt_doctor_date ON appointments(doctor_id, appt_date)
+        serves the two hottest predicates: slot availability (every
+        booking) and "busy doctor" reports. Composite order matches
+        equality-then-equality usage.
+  idx_patients_phone ON patients(phone)
+        front-desk search by phone; without it LIKE/point lookups scan
+        the patients table.
+  EXPLAIN before/after is reproduced in sql/report_queries.sql - it is
+  the deliverable "show indexing matters".
+
+4.13 TRIGGERS - clause by clause
+--------------------------------
+  trg_patient_dob  BEFORE INSERT patients
+     IF NEW.dob > CURDATE() THEN SIGNAL SQLSTATE '45000'
+        BEFORE gives the app the vocabulary of rejection before the row
+        exists; SIGNAL raises a catchable user-defined error. Future-dob
+        patients are impossible.
+
+  trg_item_insert  AFTER INSERT prescription_items
+     UPDATE medicines SET stock = stock - 1 WHERE medicine_id = NEW.medicine_id
+     AND stock > 0
+        After, because the item must exist before inventory reacts. The
+        `stock > 0` guard means the count floors at zero rather than
+        tripping CHECK (stock >= 0) into an obscure error.
+
+  trg_appt_completed  AFTER UPDATE appointments
+     IF NEW.status='completed' AND OLD.status<>'completed' THEN
+       INSERT billing (...fee from doctors, 0, total=fee)
+        Fires only on the BOOKED/COMPLETED transition (idempotent);
+        NEW/OLD comparison is the trigger idiom for "changed".
+
+  trg_payment_insert  AFTER INSERT payments
+     DECLARE paid_sum; SELECT SUM(amount); UPDATE billing SET
+     paid_status = IF(paid_sum >= total,'paid','unpaid')
+        The variable holds the running sum so the flip is computed
+        atomically after the payment row lands.
+
+  trg_appt_audit_update / trg_appt_audit_delete  AFTER UPDATE / DELETE
+        One row per mutation into audit_log with the record id and
+        timestamp. AFTER (not BEFORE) so the log reflects committed rows.
+
+4.14 FUNCTION + PROCEDURES
+--------------------------
+  calculate_age(dob) RETURNS TINYINT UNSIGNED DETERMINISTIC
+     TIMESTAMPDIFF(YEAR, dob, CURDATE()) - DETERMINISM declaration lets
+     replication/optimizer trust it; the app ALSO inlines the same
+     expression (queries.ts) for hosts without UDFs.
+
+  book_appointment(p_patient,p_doctor,p_date,p_time,p_reason)
+     DECLARE scheduled TINYINT; EXIT HANDLER FOR SQLEXCEPTION -> ROLLBACK;
+     RESIGNAL (bubbles the original error after undoing partial work).
+     Counts schedule rows covering the (weekday,time) window; if zero,
+     SIGNAL 45000 'Slot is outside the doctor\'s schedule'. Otherwise
+     START TRANSACTION; INSERT; COMMIT. Error handling order matters:
+     the HANDLER rolls back SOME work, the заявление SIGNAL is the API.
+
+  cancel_appointment(p_appt)
+     Reads current status; double-cancel is a 45000 SIGNAL (no silent
+     no-op). Transaction: DELETE payments (the refund trail) -> DELETE
+     billing -> UPDATE status='cancelled' -> COMMIT.
+
+  generate_bill(p_appt)
+     SELECT fee INTO v_fee (through the appointments-doctors join);
+     SELECT SUM(medicine.price) INTO v_med through the Rx chain;
+     UPDATE billing SET medicine_cost=v_med, total=v_fee+v_med. ACID
+     single-transaction update; recomputable at will (idempotent).
+
+  get_available_slots(p_doctor, p_date)
+     Returns schedule windows plus a correlated subquery counting
+     non-cancelled appointments inside each window. The app does the same
+     math but SPLITS it into half-hour cells; this proc is the SQL-only
+     demonstration of availability as data.
+
+4.15 VIEWS
+----------
+  todays_appointments  patient/doctor/department/time/status WHERE
+     appt_date = CURDATE() - the "morning board", flattened from 4 joins.
+  doctor_workload      LEFT JOIN appointments COUNT - includes doctors
+     with ZERO appointments (the LEFT JOIN matters; an INNER JOIN hides
+     the quiet ones).
+  pending_bills        unpaid bills with patient+doctor names - receivables.
+  low_stock_medicines  stock < 10 - drives the dashboard + badges.
+  Views = logical data independence: consumers see stable shapes while the
+  underlying joins can evolve.
+
+4.16 SAMPLE DATA - what each block demonstrates
+-----------------------------------------------
+  5 departments / 6 doctors incl. two in General Medicine (set-operation
+     queries need both-single-department patients)
+  12 schedule rows across varied weekdays incl. evening shift
+  7 patients spread across ages 10..65 (calculate_age/age column variety)
+  6 medicines, two intentionally low-stocked (Atorvastatin 8, Pantoprazole
+     5) so pending_bills/low_stock views are non-empty on first load
+  4 users (admin/reception/2 doctors, password123 bcrypt-hashed)
+  7 appointments: past completed, today booked, future booked - feeds
+     todays_appointments, doctor_workload, report queries
+  3 prescriptions + 5 items incl. multi-medicine Rx and repeat meds
+  3 bills (one paid w/ payment, two unpaid) + 1 payment - revenue chart,
+     pending lists and paid-status flows are exercisable immediately.
+
+
+================================================================================
+ 5. RDBMS CONCEPTS USED - A SURVEY
+================================================================================
+
+Normalization (1NF -> 3NF)
+--------------------------
+  1NF: atomic cells; the unnormalized visit-sheet with medicine1..3
+       columns is decomposed to one prescription_items row per medicine.
+  2NF: no attribute depends on PART of a composite key -> patients,
+       doctors, appointments, prescription line items split out (fee would
+       otherwise repeat on every visit row: update anomaly).
+  3NF: no transitive chains -> department name via doctors.dept_id (never
+       stored on appointments); prescription/medicine data normalized
+       through the bridge.
+  Full walkthrough with anomalies-per-stage: docs/normalization.md.
+
+Integrity - the three flavors
+-----------------------------
+  Entity:     PKs everywhere; UNIQUE username, department, medicine name
+  Referential: FKs with RESTRICT (protect history), CASCADE (dependents),
+       SET NULL (optional links) chosen per relationship meaning
+  Domain:     ENUM status/gender/method/role, CHECK fee>0/stock>=0/
+       start<end/amount>0, DEFAULT 'booked', NOT NULLs, DATE types
+  Plus one app-level rule that SQL constraints can't express cleanly:
+  future DOBs rejected by trigger (CHECK can't call CURDATE()).
+
+Relationships & cardinality
+---------------------------
+  departments 1:N doctors          doctors 1:N doctor_schedules
+  patients 1:N appointments       doctors 1:N appointments
+  appointments 1:1 prescriptions  appointments 1:1 billing  (UNIQUE FKs)
+  prescriptions M:N medicines (bridge = prescription_items)
+  billing 1:N payments            users 0..1 doctors (SET NULL FK)
+
+Transactions & concurrency (ACID)
+---------------------------------
+  Atomicity: BEGIN...COMMIT with ROLLBACK on every write path that
+    touches >1 table (booking, prescription+stock+bill, payment+status,
+    cancellation). A crash mid-action leaves no half-prescription.
+  Consistency: constraints + triggers + (on TiDB) their app equivalents
+    re-assert every invariant after each transaction.
+  Isolation: InnoDB REPEATABLE READ + SELECT ... FOR UPDATE. The booking
+    gate locks the doctor's rows for a date: contender tx #2 blocks at the
+    FOR UPDATE, resumes after #1 commits, and its INSERT then trips the
+    UNIQUE -> ER_DUP_ENTRY -> readable "just booked" error. Two overlapping
+    FOR UPDATE predicates would deadlock; ours are disjoint because both
+    transactions hold only one doctor-date range.
+  Durability: COMMIT + InnoDB redo log (nothing app-level to do).
+
+Indexing
+--------
+  Composite (doctor_id, appt_date) - equality pair for the booking gate
+  and slot math; patients(phone) for search. The UNIQUE slot constraint
+  is itself an index the FOR UPDATE predicate walks. EXPLAIN before/after
+  comparisons live in sql/report_queries.sql (drop the index, EXPLAIN
+  TABLE SCAN; recreate, EXPLAIN REF/-range).
+
+Views - logical data independence
+---------------------------------
+  Four read-shaped views (section 4.15) keep consumer code stable while
+  underlying joins evolve; doctor_workload's LEFT JOIN is the "include
+  zeros" pattern.
+
+Window functions & set operations (reports)
+-------------------------------------------
+  RANK() OVER (ORDER BY total_appointments DESC) with ties sharing ranks;
+  INTERSECT (patients treated in BOTH departments) and UNION variants in
+  report_queries.sql, plus GROUP BY+HAVING and a scalar-subquery example:
+  every analytics syllabus box is ticked with runnable SQL.
+
+Deliberate denormalization
+--------------------------
+  billing.total is stored (not computed on read) because bills are
+  financial snapshots; recalculation is explicit (generate_bill /
+  recalculateBill). The alternative - SUM over prices live - would let
+  historic invoices silently change when a medicine price edits.
+
+
+================================================================================
+ 6. DEPLOYMENT DIVERGENCE NOTE (CANONICAL MYSQL VS TIDB CLOUD)
+================================================================================
+
+sql/schema.sql is complete MySQL 8: triggers, procedures, function. The
+production host (TiDB Cloud Serverless, free tier) does not implement
+CREATE TRIGGER / PROCEDURE / FUNCTION, so run-schema.ts applies tables +
+views only, and every trigger/procedure's behavior lives verbatim in
+server/actions.ts:
+
+  trg_patient_dob              NOT needed on cloud (no patient writes w/o
+                               validation; Zod blocks bad dates first)
+  trg_item_insert           -> UPDATE medicines stock-1 in savePrescription
+  trg_appt_completed        -> billing INSERT in completeAppointment
+  trg_payment_insert        -> paid_status UPDATE in addPayment
+  trg_appt_audit_*          -> audit_log INSERTs in complete/cancel
+  cancel_appointment        -> same steps in one transaction
+  generate_bill             -> recalculateBill()
+  calculate_age             -> inline TIMESTAMPDIFF in queries.ts
+
+On a real MySQL 8 host there is NOTHING to change: the trigger/procedure
+layer activates again and the app keeps working (the app-side logic is
+idempotent-shaped, not duplicative).
+
+To run the canonical script anywhere MySQL 8 runs:
+    mysql -u root -p < sql/schema.sql
+  or: bun run scripts/run-schema.ts <host> <port> <user> <password> [db]
+
+================================================================================
+ end of document - built by Prakhar Upadhyay, Shaurya and Tanay
+================================================================================
