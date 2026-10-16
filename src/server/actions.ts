@@ -191,19 +191,96 @@ export async function completeAppointmentAction(formData: FormData): Promise<voi
     `UPDATE appointments SET status = 'completed' WHERE appointment_id = ? AND status = 'booked'`,
     [id]
   );
+  // Trigger-equivalent (TiDB has no triggers): auto-create the billing row
+  // exactly as trg_appt_completed does on MySQL 8.
+  await pool.execute(
+    `INSERT INTO billing (appointment_id, consultation_fee, medicine_cost, total)
+     SELECT a.appointment_id, d.consultation_fee, 0, d.consultation_fee
+       FROM appointments a
+       JOIN doctors d ON d.doctor_id = a.doctor_id
+      WHERE a.appointment_id = ?
+        AND NOT EXISTS (SELECT 1 FROM billing b WHERE b.appointment_id = a.appointment_id)`,
+    [id]
+  );
+  await pool.execute(
+    `INSERT INTO audit_log (table_name, action, record_id) VALUES ('appointments', 'UPDATE', ?)`,
+    [id]
+  );
   revalidatePath(`/appointments/${id}`);
   revalidatePath("/dashboard");
 }
 
 export async function cancelAppointmentAction(formData: FormData): Promise<void> {
   const id = Number(formData.get("appointment_id"));
-  // Uses the stored procedure (updates status, deletes payments + bill).
-  await pool.execute(`CALL cancel_appointment(?)`, [id]);
+  const [rows] = await pool.execute(
+    `SELECT status FROM appointments WHERE appointment_id = ?`,
+    [id]
+  );
+  const status = (rows as any[])[0]?.status;
+  if (!status) throw new Error("Appointment not found");
+  if (status === "cancelled")
+    throw new Error("Appointment already cancelled");
+
+  // cancel_appointment procedure equivalent (TiDB-safe, same transactional
+  // steps: refund = remove payments, remove bill, set status, audit).
+  await withConn(async (conn) => {
+    await conn.beginTransaction();
+    try {
+      await conn.execute(
+        `DELETE FROM payments
+          WHERE bill_id IN (SELECT bill_id FROM billing WHERE appointment_id = ?)`,
+        [id]
+      );
+      await conn.execute(`DELETE FROM billing WHERE appointment_id = ?`, [id]);
+      await conn.execute(
+        `UPDATE appointments SET status = 'cancelled' WHERE appointment_id = ?`,
+        [id]
+      );
+      await conn.execute(
+        `INSERT INTO audit_log (table_name, action, record_id) VALUES ('appointments', 'UPDATE', ?)`,
+        [id]
+      );
+      await conn.commit();
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    }
+  });
   revalidatePath(`/appointments/${id}`);
   revalidatePath("/dashboard");
 }
 
 /* ---------------- prescription ---------------- */
+
+/** Recalculates a bill: consultation fee + sum of prescribed medicine prices.
+ *  (generate_bill procedure equivalent for hosts without stored procedures). */
+async function recalculateBill(appointmentId: number): Promise<void> {
+  const [feeRows] = await pool.execute(
+    `SELECT d.consultation_fee FROM appointments a
+       JOIN doctors d ON d.doctor_id = a.doctor_id
+      WHERE a.appointment_id = ?`,
+    [appointmentId]
+  );
+  const fee = Number((feeRows as any[])[0]?.consultation_fee ?? 0);
+  const [medRows] = await pool.execute(
+    `SELECT COALESCE(SUM(m.price), 0) AS med
+       FROM prescriptions p
+       JOIN prescription_items it ON it.prescription_id = p.prescription_id
+       JOIN medicines m ON m.medicine_id = it.medicine_id
+      WHERE p.appointment_id = ?`,
+    [appointmentId]
+  );
+  const med = Number((medRows as any[])[0]?.med ?? 0);
+  await pool.execute(
+    `INSERT INTO billing (appointment_id, consultation_fee, medicine_cost, total)
+     VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         consultation_fee = VALUES(consultation_fee),
+         medicine_cost = VALUES(medicine_cost),
+         total = VALUES(total)`,
+    [appointmentId, fee, med, fee + med]
+  );
+}
 
 export async function savePrescriptionAction(formData: FormData): Promise<void> {
   const appointmentId = Number(formData.get("appointment_id"));
@@ -244,7 +321,8 @@ export async function savePrescriptionAction(formData: FormData): Promise<void> 
       for (let i = 0; i < medIds.length; i++) {
         if (!medIds[i] || !dosages[i] || !dayss[i]) continue;
         if (existingSet.has(medIds[i])) continue; // skip already-added med
-        // Check stock before inserting (trigger will decrement it)
+        // Check stock before inserting (stock is decremented explicitly,
+        // mirroring the trg_item_insert trigger on MySQL 8)
         const [med] = await conn.execute(
           `SELECT stock FROM medicines WHERE medicine_id = ? FOR UPDATE`,
           [medIds[i]]
@@ -257,9 +335,14 @@ export async function savePrescriptionAction(formData: FormData): Promise<void> 
            VALUES (?, ?, ?, ?)`,
           [presId, medIds[i], dosages[i], dayss[i]]
         );
+        await conn.execute(
+          `UPDATE medicines SET stock = stock - 1
+            WHERE medicine_id = ? AND stock > 0`,
+          [medIds[i]]
+        );
       }
-      // Bill now includes medicine cost (falls in the procedure)
-      await conn.execute(`CALL generate_bill(?)`, [appointmentId]);
+      // Recompute medicine cost + total (generate_bill equivalent)
+      await recalculateBill(appointmentId);
       await conn.commit();
     } catch (e) {
       await conn.rollback();
@@ -301,6 +384,21 @@ export async function addPaymentAction(formData: FormData): Promise<void> {
         `INSERT INTO payments (bill_id, amount, method) VALUES (?, ?, ?)`,
         [p.bill_id, p.amount, p.method]
       );
+      // trg_payment_insert equivalent: flip paid_status once covered
+      const [sumRows] = await conn.execute(
+        `SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE bill_id = ?`,
+        [p.bill_id]
+      );
+      const [totRows] = await conn.execute(
+        `SELECT total FROM billing WHERE bill_id = ?`,
+        [p.bill_id]
+      );
+      const paid = Number((sumRows as any[])[0]?.paid ?? 0);
+      const total = Number((totRows as any[])[0]?.total ?? 0);
+      await conn.execute(
+        `UPDATE billing SET paid_status = ? WHERE bill_id = ?`,
+        [paid >= total ? "paid" : "unpaid", p.bill_id]
+      );
       await conn.commit(); // trigger trg_payment_insert updates paid_status
     } catch (e) {
       await conn.rollback();
@@ -318,7 +416,7 @@ export async function addPaymentAction(formData: FormData): Promise<void> {
 
 export async function regenerateBillAction(formData: FormData): Promise<void> {
   const appointmentId = Number(formData.get("appointment_id"));
-  await pool.execute(`CALL generate_bill(?)`, [appointmentId]);
+  await recalculateBill(appointmentId);
   revalidatePath(`/appointments/${appointmentId}`);
 }
 

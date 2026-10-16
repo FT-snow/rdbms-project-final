@@ -13,18 +13,6 @@ USE hospital_db;
 -- TABLES (3NF)
 -- ------------------------------------------------------------
 
--- Login users (admin / doctor / receptionist)
-CREATE TABLE users (
-  user_id       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  username      VARCHAR(50)  NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  role          ENUM('admin','doctor','receptionist') NOT NULL,
-  doctor_id     INT UNSIGNED NULL,                  -- links a doctor login to doctors table
-  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT fk_users_doctor FOREIGN KEY (doctor_id)
-    REFERENCES doctors(doctor_id) ON DELETE SET NULL
-);
-
 CREATE TABLE departments (
   dept_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name    VARCHAR(100) NOT NULL UNIQUE
@@ -146,6 +134,19 @@ CREATE TABLE audit_log (
 );
 
 -- Indexes for the report (EXPLAIN before/after demo lives in report_queries.sql)
+-- Login users (created after doctors so the FK target exists) (admin / doctor / receptionist)
+CREATE TABLE users (
+  user_id       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  username      VARCHAR(50)  NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role          ENUM('admin','doctor','receptionist') NOT NULL,
+  doctor_id     INT UNSIGNED NULL,                  -- links a doctor login to doctors table
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_users_doctor FOREIGN KEY (doctor_id)
+    REFERENCES doctors(doctor_id) ON DELETE SET NULL
+);
+
+
 CREATE INDEX idx_appt_doctor_date ON appointments (doctor_id, appt_date);
 CREATE INDEX idx_patients_phone   ON patients (phone);
 
@@ -385,79 +386,126 @@ SELECT medicine_id, name, price, stock
 -- SAMPLE DATA
 -- ------------------------------------------------------------
 
-INSERT INTO departments (name) VALUES
-('General Medicine'), ('Cardiology'), ('Orthopedics'),
-('Pediatrics'), ('Dermatology');
+INSERT INTO departments (name) VALUES ('General Medicine');
+INSERT INTO departments (name) VALUES ('Cardiology');
+INSERT INTO departments (name) VALUES ('Orthopedics');
+INSERT INTO departments (name) VALUES ('Pediatrics');
+INSERT INTO departments (name) VALUES ('Dermatology');
 
 INSERT INTO doctors (name, dept_id, specialization, phone, consultation_fee) VALUES
-('Dr. Ananya Rao',    2, 'Interventional Cardiology', '9876500001', 800.00),
-('Dr. Vikram Shetty', 1, 'General Physician',         '9876500002', 400.00),
-('Dr. Meera Pillai',  3, 'Joint Replacement',         '9876500003', 700.00),
-('Dr. Rohan Gupta',   4, 'Child Specialist',          '9876500004', 350.00),
-('Dr. Sara Thomas',   5, 'Clinical Dermatology',      '9876500005', 500.00),
-('Dr. Arjun Menon',   1, 'General Physician',         '9876500006', 450.00);
+('Dr. Ananya Rao', 2, 'Interventional Cardiology', '9876500001', 800.00);
+INSERT INTO doctors (name, dept_id, specialization, phone, consultation_fee) VALUES
+('Dr. Vikram Shetty', 1, 'General Physician', '9876500002', 400.00);
+INSERT INTO doctors (name, dept_id, specialization, phone, consultation_fee) VALUES
+('Dr. Meera Pillai', 3, 'Joint Replacement', '9876500003', 700.00);
+INSERT INTO doctors (name, dept_id, specialization, phone, consultation_fee) VALUES
+('Dr. Rohan Gupta', 4, 'Child Specialist', '9876500004', 350.00);
+INSERT INTO doctors (name, dept_id, specialization, phone, consultation_fee) VALUES
+('Dr. Sara Thomas', 5, 'Clinical Dermatology', '9876500005', 500.00);
+INSERT INTO doctors (name, dept_id, specialization, phone, consultation_fee) VALUES
+('Dr. Arjun Menon', 1, 'General Physician', '9876500006', 450.00);
 
-INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
 -- Note: WEEKDAY() + 1 → 1 = Monday … 7 = Sunday
-(1, 1, '09:00:00', '13:00:00'), (1, 2, '09:00:00', '13:00:00'),
-(1, 3, '14:00:00', '18:00:00'),
-(2, 1, '10:00:00', '16:00:00'), (2, 4, '09:00:00', '13:00:00'),
-(3, 3, '09:00:00', '12:00:00'), (3, 5, '09:00:00', '12:00:00'),
-(4, 2, '11:00:00', '17:00:00'), (4, 5, '10:00:00', '14:00:00'),
-(5, 6, '09:00:00', '13:00:00'),
-(6, 1, '14:00:00', '19:00:00'), (6, 6, '10:00:00', '15:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(1, 1, '09:00:00', '13:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(1, 2, '09:00:00', '13:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(1, 3, '14:00:00', '18:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(2, 1, '10:00:00', '16:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(2, 4, '09:00:00', '13:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(3, 3, '09:00:00', '12:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(3, 5, '09:00:00', '12:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(4, 2, '11:00:00', '17:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(4, 5, '10:00:00', '14:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(5, 6, '09:00:00', '13:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(6, 1, '14:00:00', '19:00:00');
+INSERT INTO doctor_schedules (doctor_id, day_of_week, start_time, end_time) VALUES
+(6, 6, '10:00:00', '15:00:00');
 
 INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
-('Ravi Kumar',    '1985-04-12', 'male',   '9911100001', 'ravi@mail.com',   'MG Road, Bangalore'),
-('Sunita Devi',   '1972-09-30', 'female', '9911100002', 'sunita@mail.com', 'Indiranagar, Bangalore'),
-('Arun Nair',     '1998-01-20', 'male',   '9911100003', NULL,              'Koramangala, Bangalore'),
-('Priya Menon',   '2015-06-05', 'female', '9911100004', NULL,              'HSR Layout, Bangalore'),
-('Kiran Das',     '1960-11-11', 'male',   '9911100005', 'kiran@mail.com',  'Whitefield, Bangalore'),
-('Lata Sharma',   '1990-03-17', 'female', '9911100006', NULL,              'Jayanagar, Bangalore'),
-('Imran Khan',    '2001-08-23', 'male',   '9911100007', NULL,              'Marathahalli, Bangalore');
+('Ravi Kumar', '1985-04-12', 'male', '9911100001', 'ravi@mail.com', 'MG Road, Bangalore');
+INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
+('Sunita Devi', '1972-09-30', 'female', '9911100002', 'sunita@mail.com', 'Indiranagar, Bangalore');
+INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
+('Arun Nair', '1998-01-20', 'male', '9911100003', NULL, 'Koramangala, Bangalore');
+INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
+('Priya Menon', '2015-06-05', 'female', '9911100004', NULL, 'HSR Layout, Bangalore');
+INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
+('Kiran Das', '1960-11-11', 'male', '9911100005', 'kiran@mail.com', 'Whitefield, Bangalore');
+INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
+('Lata Sharma', '1990-03-17', 'female', '9911100006', NULL, 'Jayanagar, Bangalore');
+INSERT INTO patients (name, dob, gender, phone, email, address) VALUES
+('Imran Khan', '2001-08-23', 'male', '9911100007', NULL, 'Marathahalli, Bangalore');
 
-INSERT INTO medicines (name, price, stock) VALUES
-('Paracetamol 500mg', 15.00, 200),
-('Amoxicillin 250mg', 42.00,  80),
-('Atorvastatin 10mg', 55.00,   8),   -- low stock on purpose
-('Cetirizine 10mg',   9.00,  150),
-('Metformin 500mg',   28.00,  60),
-('Pantoprazole 40mg', 33.00,    5);  -- low stock on purpose
+INSERT INTO medicines (name, price, stock) VALUES ('Paracetamol 500mg', 15.00, 200);
+INSERT INTO medicines (name, price, stock) VALUES ('Amoxicillin 250mg', 42.00, 80);
+-- low stock on purpose
+INSERT INTO medicines (name, price, stock) VALUES ('Atorvastatin 10mg', 55.00, 8);
+INSERT INTO medicines (name, price, stock) VALUES ('Cetirizine 10mg', 9.00, 150);
+INSERT INTO medicines (name, price, stock) VALUES ('Metformin 500mg', 28.00, 60);
+-- low stock on purpose
+INSERT INTO medicines (name, price, stock) VALUES ('Pantoprazole 40mg', 33.00, 5);
 
-INSERT INTO users (username, password_hash, role, doctor_id) VALUES
 -- All demo passwords are "password123" (bcrypt hashes below)
-('admin',        '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'admin',        NULL),
-('reception',    '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'receptionist', NULL),
-('dr.ananya',    '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'doctor',       1),
-('dr.vikram',    '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'doctor',       2);
+INSERT INTO users (username, password_hash, role, doctor_id) VALUES
+('admin', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'admin', NULL);
+INSERT INTO users (username, password_hash, role, doctor_id) VALUES
+('reception', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'receptionist', NULL);
+INSERT INTO users (username, password_hash, role, doctor_id) VALUES
+('dr.ananya', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'doctor', 1);
+INSERT INTO users (username, password_hash, role, doctor_id) VALUES
+('dr.vikram', '$2a$10$YCrqUo.jLlbgxVOpy/0RvuSCqIGDK4vtXQnEVvOOW0zKCQecwKhuK', 'doctor', 2);
 
 -- A few appointments across the past week so the report views have data
 INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
-(1, 2, CURDATE() - INTERVAL 3 DAY, '10:30:00', 'completed', 'Recurring headaches'),
-(2, 1, CURDATE() - INTERVAL 3 DAY, '09:30:00', 'completed', 'Chest discomfort'),
-(3, 2, CURDATE() - INTERVAL 1 DAY, '11:00:00', 'completed', 'Seasonal fever'),
-(4, 4, CURDATE(),                  '11:30:00', 'booked',    'Routine checkup'),
-(5, 1, CURDATE(),                  '09:30:00', 'booked',    'Ongoing BP treatment'),
-(6, 3, CURDATE() + INTERVAL 2 DAY, '09:30:00', 'booked',    'Knee pain'),
-(7, 2, CURDATE() + INTERVAL 3 DAY, '12:00:00', 'booked',    'Fatigue and body ache');
+(1, 2, CURDATE() - INTERVAL 3 DAY, '10:30:00', 'completed', 'Recurring headaches');
+INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
+(2, 1, CURDATE() - INTERVAL 3 DAY, '09:30:00', 'completed', 'Chest discomfort');
+INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
+(3, 2, CURDATE() - INTERVAL 1 DAY, '11:00:00', 'completed', 'Seasonal fever');
+INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
+(4, 4, CURDATE(), '11:30:00', 'booked', 'Routine checkup');
+INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
+(5, 1, CURDATE(), '09:30:00', 'booked', 'Ongoing BP treatment');
+INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
+(6, 3, CURDATE() + INTERVAL 2 DAY, '09:30:00', 'booked', 'Knee pain');
+INSERT INTO appointments (patient_id, doctor_id, appt_date, appt_time, status, reason) VALUES
+(7, 2, CURDATE() + INTERVAL 3 DAY, '12:00:00', 'booked', 'Fatigue and body ache');
 
 INSERT INTO prescriptions (appointment_id, diagnosis, notes) VALUES
-(1, 'Tension headache', 'Stay hydrated, monitor BP'),
-(2, 'Coronary insufficiency - initial eval', 'ECG follow-up in a week'),
+(1, 'Tension headache', 'Stay hydrated, monitor BP');
+INSERT INTO prescriptions (appointment_id, diagnosis, notes) VALUES
+(2, 'Coronary insufficiency - initial eval', 'ECG follow-up in a week');
+INSERT INTO prescriptions (appointment_id, diagnosis, notes) VALUES
 (3, 'Viral fever', 'Rest for 3 days');
 
 INSERT INTO prescription_items (prescription_id, medicine_id, dosage, days) VALUES
-(1, 1, '1 tablet after lunch', 5),
-(1, 3, '1 tablet at night',    30),
-(2, 2, '1 capsule 2x daily',   7),
-(3, 4, '1 tablet at bedtime',  3),
+(1, 1, '1 tablet after lunch', 5);
+INSERT INTO prescription_items (prescription_id, medicine_id, dosage, days) VALUES
+(1, 3, '1 tablet at night', 30);
+INSERT INTO prescription_items (prescription_id, medicine_id, dosage, days) VALUES
+(2, 2, '1 capsule 2x daily', 7);
+INSERT INTO prescription_items (prescription_id, medicine_id, dosage, days) VALUES
+(3, 4, '1 tablet at bedtime', 3);
+INSERT INTO prescription_items (prescription_id, medicine_id, dosage, days) VALUES
 (3, 6, '1 tablet twice daily', 5);
 
 -- Bills for completed appointments (auto-created by trigger, medicine cost added here)
 INSERT INTO billing (appointment_id, consultation_fee, medicine_cost, total, paid_status) VALUES
-(1, 400.00, 15.00 + 55.00, 470.00, 'paid'),
-(2, 800.00, 42.00,          842.00, 'unpaid'),
-(3, 400.00,  9.00 + 33.00,  442.00, 'unpaid');
+(1, 400.00, 70.00, 470.00, 'paid');
+INSERT INTO billing (appointment_id, consultation_fee, medicine_cost, total, paid_status) VALUES
+(2, 800.00, 42.00, 842.00, 'unpaid');
+INSERT INTO billing (appointment_id, consultation_fee, medicine_cost, total, paid_status) VALUES
+(3, 400.00, 42.00, 442.00, 'unpaid');
 
 INSERT INTO payments (bill_id, amount, method) VALUES
 (1, 470.00, 'cash');

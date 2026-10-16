@@ -35,14 +35,17 @@ function parseStatements(sql: string): string[] {
       continue;
     }
     buffer += line + "\n";
-    // statement end: line ends with current delimiter
-    if (delimiter === ";" && line.trimEnd().endsWith(";")) {
-      if (buffer.trim()) stmts.push(buffer.trim());
+    // statement end: line ends with the current delimiter — but do NOT reset
+    // it here; only DELIMITER directives change it (routines end with $$ and
+    // the next routine also ends with $$).
+    if (line.trimEnd().endsWith(delimiter)) {
+      if (buffer.trim())
+        stmts.push(
+          delimiter === ";"
+            ? buffer.trim()
+            : buffer.trim().slice(0, -delimiter.length)
+        );
       buffer = "";
-    } else if (delimiter !== ";" && line.trimEnd().endsWith(delimiter)) {
-      if (buffer.trim()) stmts.push(buffer.trim().slice(0, -delimiter.length));
-      buffer = "";
-      delimiter = ";";
     }
   }
   if (buffer.trim()) stmts.push(buffer.trim());
