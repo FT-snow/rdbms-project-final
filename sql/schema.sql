@@ -49,9 +49,10 @@ CREATE TABLE patients (
   gender     ENUM('male','female','other') NOT NULL,
   phone      VARCHAR(20)  NOT NULL,
   email      VARCHAR(150) NULL,
-  address    VARCHAR(255) NULL,
-  CONSTRAINT chk_pat_dob CHECK (dob <= CURDATE())
+  address    VARCHAR(255) NULL
 );
+-- NOTE: dob <= today is enforced by trigger trg_patient_dob (below), because
+-- MySQL 8 CHECK constraints cannot call nondeterministic functions like CURDATE().
 
 CREATE TABLE doctor_schedules (
   schedule_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -153,6 +154,17 @@ CREATE INDEX idx_patients_phone   ON patients (phone);
 -- ------------------------------------------------------------
 
 DELIMITER $$
+
+-- 0) Patients: reject future dates of birth (CHECK can't call CURDATE())
+CREATE TRIGGER trg_patient_dob
+BEFORE INSERT ON patients
+FOR EACH ROW
+BEGIN
+  IF NEW.dob > CURDATE() THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Date of birth cannot be in the future';
+  END IF;
+END$$
 
 -- 1) After inserting a prescription item: reduce medicine stock
 CREATE TRIGGER trg_item_insert
