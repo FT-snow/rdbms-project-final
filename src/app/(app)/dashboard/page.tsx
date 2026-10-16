@@ -7,8 +7,9 @@ import Link from "next/link";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const data = await getDashboardData().catch(() => null);
-  if (!data) return <DbUnavailable page="dashboard" />;
+  let dbErr: unknown;
+  const data = await getDashboardData().catch((e) => ((dbErr = e), null));
+  if (!data) return <DbUnavailable page="dashboard" error={dbErr} />;
   const dt = new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
     day: "numeric",

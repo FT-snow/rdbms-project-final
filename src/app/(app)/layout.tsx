@@ -5,6 +5,7 @@
 import { requireSession } from "@/lib/auth";
 import { logoutAction } from "@/server/actions";
 import { NavLink } from "@/components/nav-links";
+import { FlashBanner } from "@/components/flash-banner";
 import Link from "next/link";
 
 export default async function AppLayout({
@@ -54,7 +55,10 @@ export default async function AppLayout({
         </div>
       </header>
 
-      <main className="container max-w-6xl px-6 py-10 md:px-10 md:py-12">{children}</main>
+      <main className="container max-w-6xl px-6 py-10 md:px-10 md:py-12">
+        <FlashBanner />
+        {children}
+      </main>
     </div>
   );
 }

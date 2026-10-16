@@ -18,11 +18,13 @@ export default async function PatientHistoryPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const patient = await getPatient(Number(id)).catch(() => "db" as const);
-  if (patient === "db") return <DbUnavailable page="patient history" />;
+  let dbErr: unknown;
+  const patient = await getPatient(Number(id)).catch((e) => ((dbErr = e), "db" as const));
+  if (patient === "db") return <DbUnavailable page="patient history" error={dbErr} />;
   if (!patient) notFound();
-  const history = await getPatientHistory(Number(id)).catch(() => null as null);
-  if (!history) return <DbUnavailable page="patient history" />;
+  let dbErr2: unknown;
+  const history = await getPatientHistory(Number(id)).catch((e) => ((dbErr2 = e), null));
+  if (!history) return <DbUnavailable page="patient history" error={dbErr2} />;
 
   return (
     <section className="space-y-8">

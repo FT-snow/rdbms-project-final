@@ -9,8 +9,9 @@ import { DbUnavailable } from "@/components/db-unavailable";
 export const dynamic = "force-dynamic";
 
 export default async function MedicinesPage() {
-  const medicines = await getMedicines().catch(() => null);
-  if (!medicines) return <DbUnavailable page="medicines" />;
+  let dbErr: unknown;
+  const medicines = await getMedicines().catch((e) => ((dbErr = e), null));
+  if (!medicines) return <DbUnavailable page="medicines" error={dbErr} />;
   const low = medicines.filter((m) => m.stock < 10).length;
 
   return (

@@ -15,8 +15,9 @@ export default async function PatientsPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const { q = "" } = await searchParams;
-  const patients = await searchPatients(q).catch(() => null);
-  if (!patients) return <DbUnavailable page="patients" />;
+  let dbErr: unknown;
+  const patients = await searchPatients(q).catch((e) => ((dbErr = e), null));
+  if (!patients) return <DbUnavailable page="patients" error={dbErr} />;
 
   return (
     <section className="space-y-8">

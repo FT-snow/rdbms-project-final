@@ -6,8 +6,9 @@ import { DbUnavailable } from "@/components/db-unavailable";
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  const reports = await getReports().catch(() => null as null);
-  if (!reports) return <DbUnavailable page="reports" />;
+  let dbErr: unknown;
+  const reports = await getReports().catch((e) => ((dbErr = e), null));
+  if (!reports) return <DbUnavailable page="reports" error={dbErr} />;
   const { busy, aboveAvg, ranked, revDept, audit } = reports;
 
   return (

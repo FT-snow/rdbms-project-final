@@ -10,10 +10,11 @@ export const dynamic = "force-dynamic";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default async function DoctorsPage() {
+  let dbErr: unknown;
   const all = await Promise.all([getDoctors(), getSchedules(), getDepartments()]).catch(
-    () => null,
+    (e) => ((dbErr = e), null),
   );
-  if (!all) return <DbUnavailable page="doctors" />;
+  if (!all) return <DbUnavailable page="doctors" error={dbErr} />;
   const [doctors, schedules, departments] = all;
   const deptName = new Map(departments.map((d) => [d.dept_id, d.name]));
   const byDoctor = new Map<number, any[]>();

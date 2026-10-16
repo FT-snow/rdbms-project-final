@@ -20,8 +20,9 @@ export default async function BookPage({
   }>;
 }) {
   const sp = await searchParams;
-  const departments = await getDepartments().catch(() => null as null);
-  if (!departments) return <DbUnavailable page="booking" />;
+  let dbErr: unknown;
+  const departments = await getDepartments().catch((e) => ((dbErr = e), null));
+  if (!departments) return <DbUnavailable page="booking" error={dbErr} />;
   const today = new Date().toISOString().slice(0, 10);
 
   const deptId = sp.dept ? Number(sp.dept) : undefined;

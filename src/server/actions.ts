@@ -8,6 +8,8 @@ import {
   createSessionCookie,
   clearSessionCookie,
 } from "@/lib/auth";
+import { formatDbError } from "@/lib/errors";
+import { headers } from "next/headers";
 import {
   loginSchema,
   patientSchema,
@@ -20,6 +22,34 @@ import {
 
 type FormState = { error?: string; ok?: string } | null;
 
+/**
+ * Wraps void form actions: precise errors instead of opaque 500 digests.
+ * Failures are logged with full stack (visible in Vercel runtime logs) and
+ * the human message is redirected back as ?error= for the FlashBanner.
+ * Next.js control-flow exceptions (redirect/notFound) pass through untouched.
+ */
+async function safeAction(
+  fn: (formData: FormData) => Promise<void>,
+  formData: FormData
+): Promise<void> {
+  try {
+    await fn(formData);
+  } catch (e) {
+    const digest = (e as { digest?: string })?.digest;
+    if (typeof digest === "string" && digest.startsWith("NEXT_")) throw e;
+    console.error("[action error]", e);
+    const message =
+      e instanceof Error && e.message
+        ? e.message
+        : "Unexpected error — see runtime logs for details.";
+    const referer = (await headers()).get("referer") ?? "/dashboard";
+    const url = new URL(referer);
+    url.searchParams.set("error", message.slice(0, 220));
+    redirect(url.pathname + (url.search || "?error=" + encodeURIComponent(message.slice(0, 220))));
+  }
+}
+
+
 /* ---------------- auth ---------------- */
 
 export async function loginAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -28,7 +58,15 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
     password: formData.get("password"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-  const session = await doAuth(parsed.data.username, parsed.data.password);
+  let session: Awaited<ReturnType<typeof doAuth>>;
+  try {
+    session = await doAuth(parsed.data.username, parsed.data.password);
+  } catch (e) {
+    // Database-level failure (bad env vars, network, schema missing) —
+    // surface the precise cause instead of a generic digest.
+    console.error("[login] database error:", e);
+    return { error: formatDbError(e) };
+  }
   if (!session) return { error: "Invalid username or password" };
   await createSessionCookie(session);
   redirect("/dashboard");
@@ -41,7 +79,7 @@ export async function logoutAction() {
 
 /* ---------------- patients ---------------- */
 
-export async function createPatientAction(formData: FormData): Promise<void> {
+async function _createPatientAction(formData: FormData): Promise<void> {
   const parsed = patientSchema.safeParse({
     name: formData.get("name"),
     dob: formData.get("dob"),
@@ -60,7 +98,7 @@ export async function createPatientAction(formData: FormData): Promise<void> {
   revalidatePath("/patients");
 }
 
-export async function updatePatientAction(formData: FormData): Promise<void> {
+async function _updatePatientAction(formData: FormData): Promise<void> {
   const parsed = patientSchema.safeParse({
     name: formData.get("name"),
     dob: formData.get("dob"),
@@ -83,7 +121,7 @@ export async function updatePatientAction(formData: FormData): Promise<void> {
 
 /* ---------------- doctors & schedules ---------------- */
 
-export async function createDoctorAction(formData: FormData): Promise<void> {
+async function _createDoctorAction(formData: FormData): Promise<void> {
   const parsed = doctorSchema.safeParse({
     name: formData.get("name"),
     dept_id: formData.get("dept_id"),
@@ -101,7 +139,7 @@ export async function createDoctorAction(formData: FormData): Promise<void> {
   revalidatePath("/doctors");
 }
 
-export async function createScheduleAction(formData: FormData): Promise<void> {
+async function _createScheduleAction(formData: FormData): Promise<void> {
   const parsed = scheduleSchema.safeParse({
     doctor_id: formData.get("doctor_id"),
     day_of_week: formData.get("day_of_week"),
@@ -134,7 +172,7 @@ export async function createScheduleAction(formData: FormData): Promise<void> {
 
 /* ---------------- appointments (ACID booking) ---------------- */
 
-export async function bookAppointmentAction(formData: FormData): Promise<void> {
+async function _bookAppointmentAction(formData: FormData): Promise<void> {
   const parsed = bookSchema.safeParse({
     patient_id: formData.get("patient_id"),
     doctor_id: formData.get("doctor_id"),
@@ -185,7 +223,7 @@ export async function bookAppointmentAction(formData: FormData): Promise<void> {
   redirect(`/appointments/${newId}`);
 }
 
-export async function completeAppointmentAction(formData: FormData): Promise<void> {
+async function _completeAppointmentAction(formData: FormData): Promise<void> {
   const id = Number(formData.get("appointment_id"));
   await pool.execute(
     `UPDATE appointments SET status = 'completed' WHERE appointment_id = ? AND status = 'booked'`,
@@ -210,7 +248,7 @@ export async function completeAppointmentAction(formData: FormData): Promise<voi
   revalidatePath("/dashboard");
 }
 
-export async function cancelAppointmentAction(formData: FormData): Promise<void> {
+async function _cancelAppointmentAction(formData: FormData): Promise<void> {
   const id = Number(formData.get("appointment_id"));
   const [rows] = await pool.execute(
     `SELECT status FROM appointments WHERE appointment_id = ?`,
@@ -282,7 +320,7 @@ async function recalculateBill(appointmentId: number): Promise<void> {
   );
 }
 
-export async function savePrescriptionAction(formData: FormData): Promise<void> {
+async function _savePrescriptionAction(formData: FormData): Promise<void> {
   const appointmentId = Number(formData.get("appointment_id"));
   const diagnosis = String(formData.get("diagnosis") ?? "");
   const notes = String(formData.get("notes") ?? "");
@@ -354,7 +392,7 @@ export async function savePrescriptionAction(formData: FormData): Promise<void> 
 
 /* ---------------- billing & payments ---------------- */
 
-export async function addPaymentAction(formData: FormData): Promise<void> {
+async function _addPaymentAction(formData: FormData): Promise<void> {
   const parsed = paymentSchema.safeParse({
     bill_id: formData.get("bill_id"),
     amount: formData.get("amount"),
@@ -414,7 +452,7 @@ export async function addPaymentAction(formData: FormData): Promise<void> {
   revalidatePath("/dashboard");
 }
 
-export async function regenerateBillAction(formData: FormData): Promise<void> {
+async function _regenerateBillAction(formData: FormData): Promise<void> {
   const appointmentId = Number(formData.get("appointment_id"));
   await recalculateBill(appointmentId);
   revalidatePath(`/appointments/${appointmentId}`);
@@ -422,7 +460,7 @@ export async function regenerateBillAction(formData: FormData): Promise<void> {
 
 /* ---------------- medicines ---------------- */
 
-export async function addMedicineAction(formData: FormData): Promise<void> {
+async function _addMedicineAction(formData: FormData): Promise<void> {
   const parsed = medicineSchema.safeParse({
     name: formData.get("name"),
     price: formData.get("price"),
@@ -437,7 +475,7 @@ export async function addMedicineAction(formData: FormData): Promise<void> {
   revalidatePath("/medicines");
 }
 
-export async function restockMedicineAction(formData: FormData): Promise<void> {
+async function _restockMedicineAction(formData: FormData): Promise<void> {
   const id = Number(formData.get("medicine_id"));
   const qty = Number(formData.get("qty"));
   if (!qty || qty <= 0) throw new Error("Quantity must be positive");
@@ -446,4 +484,43 @@ export async function restockMedicineAction(formData: FormData): Promise<void> {
     [qty, id]
   );
   revalidatePath("/medicines");
+}
+
+
+// Wrapped exports: precise error surfacing via ?error= flash
+export async function createPatientAction(formData: FormData): Promise<void> {
+  await safeAction(_createPatientAction, formData);
+}
+export async function updatePatientAction(formData: FormData): Promise<void> {
+  await safeAction(_updatePatientAction, formData);
+}
+export async function createDoctorAction(formData: FormData): Promise<void> {
+  await safeAction(_createDoctorAction, formData);
+}
+export async function createScheduleAction(formData: FormData): Promise<void> {
+  await safeAction(_createScheduleAction, formData);
+}
+export async function bookAppointmentAction(formData: FormData): Promise<void> {
+  await safeAction(_bookAppointmentAction, formData);
+}
+export async function completeAppointmentAction(formData: FormData): Promise<void> {
+  await safeAction(_completeAppointmentAction, formData);
+}
+export async function cancelAppointmentAction(formData: FormData): Promise<void> {
+  await safeAction(_cancelAppointmentAction, formData);
+}
+export async function savePrescriptionAction(formData: FormData): Promise<void> {
+  await safeAction(_savePrescriptionAction, formData);
+}
+export async function addPaymentAction(formData: FormData): Promise<void> {
+  await safeAction(_addPaymentAction, formData);
+}
+export async function regenerateBillAction(formData: FormData): Promise<void> {
+  await safeAction(_regenerateBillAction, formData);
+}
+export async function addMedicineAction(formData: FormData): Promise<void> {
+  await safeAction(_addMedicineAction, formData);
+}
+export async function restockMedicineAction(formData: FormData): Promise<void> {
+  await safeAction(_restockMedicineAction, formData);
 }

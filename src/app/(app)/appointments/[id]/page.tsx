@@ -24,8 +24,9 @@ export default async function AppointmentDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const data = await getAppointment(Number(id)).catch(() => "db" as const);
-  if (data === "db") return <DbUnavailable page="appointment detail" />;
+  let dbErr: unknown;
+  const data = await getAppointment(Number(id)).catch((e) => ((dbErr = e), "db" as const));
+  if (data === "db") return <DbUnavailable page="appointment detail" error={dbErr} />;
   if (!data) notFound();
   const { appointment, prescription, items, bill, medicines } = data;
   const balance = bill ? Number(bill.total) - bill.paid : 0;
